@@ -5,7 +5,33 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-20T08:13:36.102243297Z"
+    created: "2026-11-20T23:21:40.913315273Z"
+    description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
+      plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
+      — converted from the upstream docker-compose.advanced.yml multi-container layout
+      into a single self-contained chart. '
+    digest: 957f7a43cfaffc1f6c3b9a51a45470f17d58469dd0c227334efcae9d264a70dc
+    home: https://siloserver.org
+    keywords:
+    - media
+    - streaming
+    - jellyfin
+    - audiobookshelf
+    - postgresql
+    - redis
+    - dragonflydb
+    - meilisearch
+    kubeVersion: '>=1.25.0-0'
+    name: silo
+    type: application
+    urls:
+    - https://jpjpjunior.github.io/helm-silo/silo-0.3.1.tgz
+    version: 0.3.1
+  - annotations:
+      category: Media
+    apiVersion: v2
+    appVersion: latest
+    created: "2026-11-20T23:21:40.91231488Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
       — converted from the upstream docker-compose.advanced.yml multi-container layout
@@ -31,7 +57,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-20T08:13:36.101249844Z"
+    created: "2026-11-20T23:21:40.911314352Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
       from the upstream docker-compose.advanced.yml multi-container layout into a
@@ -56,7 +82,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-20T08:13:36.10033662Z"
+    created: "2026-11-20T23:21:40.910391814Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
       from the upstream docker-compose.advanced.yml multi-container layout into a
@@ -77,4 +103,4 @@ entries:
     urls:
     - https://jpjpjunior.github.io/helm-silo/silo-0.2.0.tgz
     version: 0.2.0
-generated: "2026-11-20T08:13:36.099234083Z"
+generated: "2026-11-20T23:21:40.909312Z"
