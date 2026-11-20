@@ -129,11 +129,20 @@ silo:
     # default is Always. Pin a version tag for reproducible deploys.
     pullPolicy: Always
 
-  # -- The account that runs Silo and owns its directories; drives
-  # runAsUser / runAsGroup / fsGroup and the PUID/PGID env vars. It needs
-  # read access to the media.
+  # -- The account Silo runs as after startup; drives the PUID/PGID env
+  # vars and fsGroup. The image's s6-overlay init must start as ROOT and
+  # drops privileges to PUID:PGID itself (exactly like the compose file, so
+  # the pod deliberately runs as root at first). Needs read access to the
+  # media. With silo.nonRootMode=true the values become runAsUser/runAsGroup.
   puid: 1000
   pgid: 1000
+
+  # -- Skip the image's s6 init (which needs root) and run the `silo` binary
+  # directly as PUID:PGID (runAsNonRoot: true) — for clusters enforcing the
+  # `restricted` pod-security profile. Per the image's own docs this mode
+  # requires an external PostgreSQL, so silo.databaseUrlOverride must be set;
+  # the chart fails rendering otherwise.
+  nonRootMode: false
 
   # -- REQUIRED (unless silo.secretKey is set): name of an existing Secret
   # holding the at-rest credential encryption master key.

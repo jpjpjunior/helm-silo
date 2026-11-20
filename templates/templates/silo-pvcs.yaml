@@ -1,0 +1,24 @@
+{{/* One PVC per silo.persistence entry, unless the entry points at an
+     existing claim. Key names become the claim suffix (e.g. <fullname>-media). */}}
+{{- range $name, $vol := .Values.silo.persistence }}
+{{- if not $vol.existingClaim }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-%s" (include "silo.fullname" $) $name }}
+  labels:
+    {{- include "silo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: silo
+spec:
+  accessModes:
+    {{- $vol.accessModes | default (list "ReadWriteOnce") | toYaml | nindent 4 }}
+  {{- $sc := include "silo.storageClass" (dict "root" $ "storageClass" $vol.storageClass) }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $vol.size }}
+{{- end }}
+{{- end }}

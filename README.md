@@ -76,7 +76,7 @@ container/pod instead of Silo's omnibus single container.
 | `stop_grace_period: 2m` | `silo.terminationGracePeriodSeconds: 120` |
 | `cap_add: [NET_ADMIN]` | `silo.capabilities: [NET_ADMIN]` (set `[]` to undo) |
 | `depends_on: condition: service_healthy` | `silo.initContainers.enabled` — a small busybox init container waits for postgres/redis |
-| `PUID` / `PGID` | `silo.puid` / `silo.pgid` → `runAsUser` / `runAsGroup` / `fsGroup` + the same env vars |
+| `PUID` / `PGID` | `silo.puid` / `silo.pgid` → `PUID`/`PGID` env vars (the image's s6 init drops privileges to them; `fsGroup` = pgid) |
 | `${MEDIA_ROOT}:...:ro` | `silo.persistence.media` (PVC or `existingClaim`, mounted read-only) |
 | `SILO_DATA_ROOT` subdirectories | one PVC each under `silo.persistence.*` |
 | `/proc/{meminfo,stat,loadavg}` host mounts | `silo.hostProc.enabled` (**off by default** — only useful when the Kubernetes nodes are themselves LXC containers; needs hostPath permissions) |
@@ -109,9 +109,33 @@ silo:
       existingClaim: media-nfs
 ```
 
-The media is mounted read-only (`readOnly: true`), like compose. Silo runs as
-`PUID:PGID` (default 1000:1000), which needs read access to the media; the
-chart sets `fsGroup` to PGID so fresh PVC mounts are group-accessible.
+The media is mounted read-only (`readOnly: true`), like compose. The image's
+s6 init drops privileges to `PUID:PGID` (default 1000:1000), which needs read
+access to the media; the chart sets `fsGroup` to PGID so fresh PVC mounts are
+group-accessible.
+
+### Runtime user (root init, non-root escape hatch)
+
+The Silo image uses an s6-overlay init that **must start as root** and then
+drops privileges to `PUID:PGID` itself — exactly how the compose stack runs
+it (compose sets no `user:`). The chart therefore does not set `runAsUser`;
+forcing uid 1000 at start makes the init abort with *"Started as uid …, but
+this image's init needs root"*.
+
+If your cluster enforces the `restricted` pod-security profile (or you just
+want a non-root container), enable the image's documented escape hatch:
+
+```yaml
+silo:
+  nonRootMode: true          # runAsNonRoot as puid:pgid, command: ["silo"]
+  databaseUrlOverride: postgres://silo:pass@my-cluster:5432/silo?sslmode=disable
+  redisUrlOverride: redis://my-redis:6379
+  postgres:
+    enabled: false
+```
+
+Per the image's docs, non-root mode requires an external PostgreSQL, so the
+chart fails rendering if `databaseUrlOverride` is missing in this mode.
 
 ### Database / cache
 
@@ -303,7 +327,8 @@ migration is:
 | `meilisearch.persistence.size` | `10Gi` | |
 | `silo.replicaCount` | `1` | rendering fails above 1 by design |
 | `silo.existingSecret` | `""` | **required** (or `silo.secretKey` for trials) |
-| `silo.puid` / `silo.pgid` | `1000` / `1000` | runtime UID/GID + `fsGroup` |
+| `silo.puid` / `silo.pgid` | `1000` / `1000` | PUID/PGID for the s6 privilege drop + `fsGroup` |
+| `silo.nonRootMode` | `false` | skip the root s6 init (`runAsNonRoot`, `command: [silo]`); needs external PostgreSQL |
 | `silo.terminationGracePeriodSeconds` | `120` | compose `stop_grace_period` |
 | `silo.updateStrategy` | `Recreate` | required for RWO claims |
 | `silo.capabilities` | `[NET_ADMIN]` | set `[]` to drop |
@@ -334,7 +359,7 @@ or install the packaged chart directly from the `main` branch:
 
 ```console
 helm install silo \
-  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.2.0.tgz \
+  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.2.1.tgz \
   --set silo.existingSecret=silo-secrets
 ```
 

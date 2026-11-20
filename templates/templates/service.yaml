@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "silo.fullname" . }}
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: silo
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  ports:
+    {{- range $name, $p := .Values.service.ports }}
+    - name: {{ $name }}
+      port: {{ $p.port }}
+      targetPort: {{ $p.targetPort }}
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "silo.componentLabels" (dict "root" $ "component" "silo") | nindent 4 }}
