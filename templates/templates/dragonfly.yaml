@@ -1,0 +1,118 @@
+{{/* DragonflyDB — optional Redis wire-compatible cache backend. Mirrors the
+     redis.yaml layout: headless identity Service + single-instance
+     StatefulSet with a PVC. REDIS_URL points at it via silo.redisUrl. */}}
+{{- if .Values.dragonfly.enabled }}
+{{- $name := printf "%s-dragonfly" (include "silo.fullname" .) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dragonfly
+spec:
+  # Headless: the StatefulSet's identity service; REDIS_URL points here.
+  clusterIP: None
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dragonfly
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "silo.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.dragonfly.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dragonfly.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dragonfly.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dragonfly
+          image: "{{ .Values.dragonfly.image.repository }}:{{ .Values.dragonfly.image.tag }}"
+          imagePullPolicy: {{ .Values.dragonfly.image.pullPolicy }}
+          args:
+            {{- toYaml .Values.dragonfly.args | nindent 12 }}
+          env:
+            {{- with .Values.dragonfly.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          # tcpSocket probes: Dragonfly accepts RESP and HTTP on 6379 and the
+          # image ships no redis-cli, so no exec ping (same spirit as the
+          # redis compose healthcheck: "is something answering on 6379").
+          startupProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- with .Values.dragonfly.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "silo.labels" . | nindent 10 }}
+          app.kubernetes.io/component: dragonfly
+      spec:
+        accessModes:
+          {{- toYaml .Values.dragonfly.persistence.accessModes | nindent 10 }}
+        {{- $sc := include "silo.storageClass" (dict "root" . "storageClass" .Values.dragonfly.persistence.storageClass) }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.dragonfly.persistence.size }}
+{{- end }}

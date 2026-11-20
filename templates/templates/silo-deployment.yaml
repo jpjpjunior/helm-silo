@@ -72,8 +72,9 @@ spec:
               {{- if .Values.postgres.enabled }}
               until nc -z -w2 {{ include "silo.fullname" . }}-postgres 5432; do echo "waiting for postgres..."; sleep 2; done
               {{- end }}
-              {{- if .Values.redis.enabled }}
-              until nc -z -w2 {{ include "silo.fullname" . }}-redis 6379; do echo "waiting for redis..."; sleep 2; done
+              {{- if or .Values.redis.enabled .Values.dragonfly.enabled }}
+              {{- $cacheHost := printf "%s-%s" (include "silo.fullname" .) (.Values.dragonfly.enabled | ternary "dragonfly" "redis") }}
+              until nc -z -w2 {{ $cacheHost }} 6379; do echo "waiting for cache backend..."; sleep 2; done
               {{- end }}
               echo "datastores are accepting connections"
       {{- end }}
@@ -146,7 +147,7 @@ spec:
               value: {{ .Values.silo.redisUrlOverride | quote }}
             {{- else }}
             - name: REDIS_URL
-              value: redis://{{ include "silo.fullname" . }}-redis:6379
+              value: {{ include "silo.redisUrl" . | quote }}
             {{- end }}
             - name: SILO_PLUGIN_CACHE_DIR
               value: /var/lib/silo/plugins

@@ -87,6 +87,37 @@ redis:
   affinity: {}
 
 # ---------------------------------------------------------------------------
+# DragonflyDB (optional Redis replacement — Redis wire-compatible)
+# ---------------------------------------------------------------------------
+dragonfly:
+  enabled: false
+  image:
+    repository: docker.dragonflydb.io/dragonflydb/dragonfly
+    # Pinned to the last BSL 1.1 release: with v2.1 (2026-11) Dragonfly
+    # moved to a source-available license. Bump deliberately.
+    tag: v2.0.2
+    pullPolicy: IfNotPresent
+  # -- Dragonfly server flags. --proactor_threads=1 is deliberate: Dragonfly
+  # sizes its thread pool from the NODE's core count, not the container's
+  # CPU limit, so on a many-core node it would otherwise spawn dozens of
+  # threads. To make it behave like a pure cache (evict near the limit,
+  # Redis allkeys-lru style) add: --maxmemory=6Gi --cache_mode=true — but
+  # beware: eviction also drops queue/job state Silo keeps in this backend.
+  args:
+    - --alsologtostderr
+    - --proactor_threads=1
+  persistence:
+    size: 8Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
 # Meilisearch (compose `profiles: [search]` -> disabled by default)
 # ---------------------------------------------------------------------------
 meilisearch:

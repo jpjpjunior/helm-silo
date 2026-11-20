@@ -95,6 +95,16 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "postgres://%s:%s@%s-postgres:5432/%s?sslmode=disable" $auth.username (include "silo.postgresPassword" . | urlquery) (include "silo.fullname" .) $auth.database -}}
 {{- end -}}
 
+{{/* In-cluster REDIS_URL: DragonflyDB when enabled, otherwise the Redis
+     StatefulSet — both speak the Redis protocol on 6379. */}}
+{{- define "silo.redisUrl" -}}
+{{- if .Values.dragonfly.enabled -}}
+{{- printf "redis://%s-dragonfly:6379" (include "silo.fullname" .) -}}
+{{- else -}}
+{{- printf "redis://%s-redis:6379" (include "silo.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Render-time guards for values combinations that would produce a
      broken or non-starting release. Mirrors the compose file's own
      fail-fast checks (SECRET_KEY, MEILI_MASTER_KEY). */}}
@@ -108,8 +118,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (not .Values.postgres.enabled) (not .Values.silo.databaseUrlOverride) -}}
 {{- fail "silo.databaseUrlOverride is required when postgres.enabled=false (e.g. point it at a CloudNativePG cluster)" -}}
 {{- end -}}
-{{- if and (not .Values.redis.enabled) (not .Values.silo.redisUrlOverride) -}}
-{{- fail "silo.redisUrlOverride is required when redis.enabled=false" -}}
+{{- if and .Values.redis.enabled .Values.dragonfly.enabled -}}
+{{- fail "redis.enabled and dragonfly.enabled are mutually exclusive: pick one cache backend (or disable both and point silo.redisUrlOverride at an external one)" -}}
+{{- end -}}
+{{- if and (not .Values.redis.enabled) (not .Values.dragonfly.enabled) (not .Values.silo.redisUrlOverride) -}}
+{{- fail "silo.redisUrlOverride is required when redis.enabled=false and dragonfly.enabled=false (e.g. point it at an external Redis or DragonflyDB)" -}}
 {{- end -}}
 {{- if and .Values.silo.nonRootMode (not .Values.silo.databaseUrlOverride) -}}
 {{- fail "silo.nonRootMode=true runs the silo binary without the image's init, which per the image's docs requires an external PostgreSQL: set silo.databaseUrlOverride (and disable postgres)" -}}

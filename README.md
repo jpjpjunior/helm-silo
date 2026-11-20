@@ -54,12 +54,13 @@ container/pod instead of Silo's omnibus single container.
 | Kind | Name | Purpose |
 | --- | --- | --- |
 | StatefulSet + headless Service | `<release>-postgres` | pgvector/pgvector:pg18, `listen_addresses=*`, `pg_stat_statements` preloaded |
-| StatefulSet + headless Service | `<release>-redis` | redis:alpine |
+| StatefulSet + headless Service | `<release>-redis` | redis:alpine (default cache backend) |
 | StatefulSet + headless Service | `<release>-meilisearch` | getmeili/meilisearch:v1.54.0 (pinned), only with `meilisearch.enabled=true` |
+| StatefulSet + headless Service | `<release>-dragonfly` | DragonflyDB v2.0.2 (pinned), only with `dragonfly.enabled=true` — replaces the Redis one |
 | Deployment | `<release>` | Silo itself |
 | Service | `<release>` | one Service carrying web (8090→8080), jellyfin (8096), audiobookshelf (13378) |
 | PVCs | `<release>-{media,plugins,artwork,compat,transcode,download-artifacts,catalog-seeds}` | silo's data directories |
-| PVCs | via volumeClaimTemplates | postgres / redis / meilisearch data |
+| PVCs | via volumeClaimTemplates | postgres / redis / dragonfly / meilisearch data |
 | Secret | `<release>-postgres-auth` | generated PostgreSQL password + assembled `DATABASE_URL` (skipped when you bring `postgres.auth.existingSecret`) |
 | Gateway (optional) | `<release>-gateway` | only with `gateway.gateway.create=true`; otherwise HTTPRoutes attach to your existing Gateway |
 | HTTPRoute(s) (optional) | `<release>` (+ `<release>-jellyfin`, `<release>-audiobookshelf`) | only with `gateway.enabled=true` |
@@ -71,7 +72,7 @@ container/pod instead of Silo's omnibus single container.
 | `postgres` service | `postgres.enabled` (StatefulSet) |
 | `shm_size: 8gb` | `postgres.shmSize` — tmpfs `emptyDir{medium: Memory}` mounted at `/dev/shm` |
 | `command: [postgres, -c, ...]` | `postgres.args` |
-| `redis` service | `redis.enabled` (StatefulSet) |
+| `redis` service | `redis.enabled` (StatefulSet) — or `dragonfly.enabled=true` to swap in Redis-wire-compatible DragonflyDB |
 | `meilisearch` with `profiles: [search]` | `meilisearch.enabled=false` by default; enabling without a master key fails rendering, like the compose entrypoint check |
 | `stop_grace_period: 2m` | `silo.terminationGracePeriodSeconds: 120` |
 | `cap_add: [NET_ADMIN]` | `silo.capabilities: [NET_ADMIN]` (set `[]` to undo) |
@@ -160,6 +161,48 @@ chart fails rendering if `databaseUrlOverride` is missing in this mode.
   Note: with `databaseUrlOverride` (or `postgres.auth.existingSecret`) the
   `DATABASE_URL` is rendered into the Deployment spec as plain text, so
   restrict `kubectl get deployment` access accordingly.
+
+### Cache backend: Redis or DragonflyDB
+
+The cache backend (Silo's `REDIS_URL`) is Redis by default. DragonflyDB is a
+drop-in alternative that speaks the Redis wire protocol on the same port
+6379 — Silo's URL simply changes to `<release>-dragonfly:6379`, and the
+init-container wait follows automatically:
+
+```yaml
+redis:
+  enabled: false
+dragonfly:
+  enabled: true
+```
+
+(The two are mutually exclusive — enabling both fails rendering, as does
+disabling both without `silo.redisUrlOverride`.)
+
+An honest read before you switch, per Dragonfly's own docs and v2.0 sources:
+
+- **Compatibility**: Dragonfly implements ~190 Redis commands, Lua 5.4.4
+  scripting, pub/sub and streams — the surface a cache/queue client uses.
+  Edge-case differences exist (e.g. 256 MB string limit, expiry clamping
+  beyond ~8.5 years; see its "Differences with Redis" doc). Silo's exact
+  command mix can't be verified from a chart, so smoke-test against your
+  data before switching a loaded release over.
+- **Memory in Kubernetes**: Dragonfly sizes nothing from cgroup limits. Set
+  a container memory limit *and* `--maxmemory` below it, or the pod gets
+  OOM-killed under pressure — same as stock Redis without `maxmemory`, but
+  Dragonfly's baseline footprint is larger. `--cache_mode=true` enables
+  eviction near `--maxmemory`; do **not** use it if queue/job state lives in
+  this backend, eviction would silently drop it.
+- **Threads**: `--proactor_threads=1` is the chart default because Dragonfly
+  sizes its thread pool from the node's core count, not the container's CPU
+  limit. Raise it (and the CPU limit) deliberately.
+- **THP**: the transparent-huge-pages requirement from the 1.x era is gone —
+  the v2.x source contains no THP check, so any node THP setting works.
+- **Version**: pinned `v2.0.2`, the last BSL 1.1 release; with v2.1
+  (2026-11) Dragonfly moved to a source-available license. Bump deliberately.
+- **Expectations**: for a single-instance Silo the throughput win is mostly
+  theoretical — pick Dragonfly for ops preferences (one modern binary,
+  efficient snapshots), not measured speed.
 
 ### Search (Meilisearch)
 
@@ -323,6 +366,10 @@ migration is:
 | `postgres.persistence.size` | `20Gi` | |
 | `redis.enabled` | `true` | disable + `silo.redisUrlOverride` |
 | `redis.persistence.size` | `8Gi` | |
+| `dragonfly.enabled` | `false` | Redis wire-compatible replacement for the Redis StatefulSet |
+| `dragonfly.image.tag` | `v2.0.2` | pinned (last BSL 1.1 release) |
+| `dragonfly.args` | `--alsologtostderr --proactor_threads=1` | add `--maxmemory`/`--cache_mode` deliberately |
+| `dragonfly.persistence.size` | `8Gi` | |
 | `meilisearch.enabled` | `false` | needs `masterKey` or `existingSecret` |
 | `meilisearch.persistence.size` | `10Gi` | |
 | `silo.replicaCount` | `1` | rendering fails above 1 by design |
@@ -359,7 +406,7 @@ or install the packaged chart directly from the `main` branch:
 
 ```console
 helm install silo \
-  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.2.1.tgz \
+  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.3.0.tgz \
   --set silo.existingSecret=silo-secrets
 ```
 
