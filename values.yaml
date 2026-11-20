@@ -1,0 +1,351 @@
+# Default values for the silo chart.
+# Every default mirrors docker-compose.advanced.yml so that a stock
+# `helm install` behaves like the compose stack with SILO defaults.
+
+# -- Override the chart name part of resource names.
+nameOverride: ""
+
+# -- Override the full release-scoped name (used in every resource name and
+# in the in-cluster service DNS names).
+fullnameOverride: ""
+
+# -- Storage class for ALL PersistentVolumeClaims (chart default, stateful
+# sets and silo mounts). Leave empty to use the cluster's default storage
+# class. A per-claim `storageClass` overrides this.
+storageClass: ""
+
+# -- Image pull secrets for every component.
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  # -- Explicit SA name; defaults to the release fullname.
+  name: ""
+  annotations: {}
+  # Silo never talks to the Kubernetes API.
+  automountServiceAccountToken: false
+
+# ---------------------------------------------------------------------------
+# PostgreSQL (pgvector image, as in compose)
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg18
+    pullPolicy: IfNotPresent
+  auth:
+    username: silo
+    database: silo
+    # -- Empty => the chart generates a random password on first install and
+    # keeps it stable across upgrades (stored in <fullname>-postgres-auth).
+    password: ""
+    # -- Use your own Secret instead; it must contain the key below. When
+    # set, `password` is ignored and DATABASE_URL is assembled from it at
+    # render time.
+    existingSecret: ""
+    existingSecretPasswordKey: postgres-password
+  # -- compose `shm_size: 8gb`: mounted as a tmpfs (emptyDir medium: Memory)
+  # at /dev/shm. Empty string mounts it without a size limit.
+  shmSize: 8Gi
+  # -- compose `command:` for the postgres container.
+  args:
+    - postgres
+    - -c
+    - listen_addresses=*
+    - -c
+    - shared_preload_libraries=pg_stat_statements
+  persistence:
+    size: 20Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Redis
+# ---------------------------------------------------------------------------
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: alpine
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 8Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Meilisearch (compose `profiles: [search]` -> disabled by default)
+# ---------------------------------------------------------------------------
+meilisearch:
+  enabled: false
+  image:
+    repository: getmeili/meilisearch
+    # Pinned: Meilisearch will not open data written by another version.
+    # Bump deliberately, together with upgradeDb.
+    tag: v1.54.0
+    pullPolicy: IfNotPresent
+  # -- Master key; required when enabled (fail-fast, like the compose
+  # entrypoint). Prefer existingSecret for production.
+  masterKey: ""
+  existingSecret: ""
+  existingSecretKey: MEILI_MASTER_KEY
+  # -- compose MEILI_UPGRADE_DB.
+  upgradeDb: false
+  persistence:
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Silo
+# ---------------------------------------------------------------------------
+silo:
+  # -- Must stay 1: Silo is a single-instance server backed by ReadWriteOnce
+  # volumes (the chart fails rendering above 1).
+  replicaCount: 1
+  image:
+    repository: ghcr.io/silo-server/silo-server
+    tag: latest
+    # :latest + IfNotPresent leaves stale images behind on upgrades, so the
+    # default is Always. Pin a version tag for reproducible deploys.
+    pullPolicy: Always
+
+  # -- The account that runs Silo and owns its directories; drives
+  # runAsUser / runAsGroup / fsGroup and the PUID/PGID env vars. It needs
+  # read access to the media.
+  puid: 1000
+  pgid: 1000
+
+  # -- REQUIRED (unless silo.secretKey is set): name of an existing Secret
+  # holding the at-rest credential encryption master key.
+  # Create: openssl rand -base64 48
+  #         kubectl create secret generic silo-secrets \
+  #           --from-literal=SECRET_KEY='<generated key>'
+  # Back it up apart from your database dumps; without it, encrypted secrets
+  # cannot be recovered.
+  existingSecret: ""
+  existingSecretKey: SECRET_KEY
+  # -- Direct value alternative (chart stores it in <fullname>-silo-auth).
+  # Convenient for trials; use existingSecret for production.
+  secretKey: ""
+
+  # -- compose POSTGRES_TUNE. Used when the in-cluster postgres is enabled.
+  postgresTune: auto
+
+  # -- Full postgres:// URL override. Required when postgres.enabled=false
+  # (e.g. an external CloudNativePG cluster).
+  databaseUrlOverride: ""
+  # -- Full redis:// URL override. Required when redis.enabled=false.
+  redisUrlOverride: ""
+
+  # -- compose `stop_grace_period: 2m`: on stop Silo fails readiness, keeps
+  # serving for SILO_SHUTDOWN_DELAY (default 5s), then finishes in-flight
+  # requests. A single server with no load balancer in front can set the
+  # app-level delay to 0 via extraEnv: [{name: SILO_SHUTDOWN_DELAY, value: "0"}].
+  terminationGracePeriodSeconds: 120
+
+  # -- RollingUpdate is unsafe with ReadWriteOnce PVCs (the new pod cannot
+  # mount while the old one still holds the volume): default Recreate.
+  updateStrategy: Recreate
+
+  # -- compose `cap_add: [NET_ADMIN]`: lets Silo use kernel BBR congestion
+  # control and a larger TCP send buffer for remote clients on long, fast
+  # links (a startup helper holds it only until the listeners are
+  # configured). Set to [] to remove, mirroring "Undo: remove this line" in
+  # the compose file. SILO_NET_TCP_CONGESTION=off /
+  # SILO_NET_TCP_SEND_BUFFER=off (via extraEnv) turn each part off
+  # individually.
+  capabilities:
+    - NET_ADMIN
+
+  transcode:
+    # -- Intel/AMD hardware transcoding (VA-API / Quick Sync): mounts a
+    # hostPath at the container, like compose `devices: [/dev/dri:/dev/dri]`.
+    vaapi:
+      enabled: false
+      hostPath: /dev/dri
+      mountPath: /dev/dri
+    # -- NVIDIA: requires the NVIDIA container runtime on the nodes; sets
+    # runtimeClassName and injects an nvidia.com/gpu request/limit (compose
+    # capabilities: [gpu, compute, utility, video]) unless silo.resources
+    # is set — then your resources map is used as-is.
+    nvidia:
+      enabled: false
+      count: 1
+      runtimeClassName: nvidia
+
+  # -- Mounts /proc/{meminfo,stat,loadavg} from the node read-only into
+  # /host/proc/* so CPU, load and memory report this pod's share instead of
+  # the node's. Only useful when the Kubernetes nodes are themselves LXC
+  # containers (common on some home-lab setups); on bare metal/VMs the same
+  # files are what Silo reads anyway. Requires hostPath permissions
+  # (disallowed under the `restricted` pod-security profile), so it is off
+  # by default.
+  hostProc:
+    enabled: false
+
+  # -- tcpSocket probes against the always-open 8080 listener (the compose
+  # file defines no HTTP healthcheck for Silo, so none is invented here).
+  probes:
+    startup:
+      enabled: true
+      periodSeconds: 2
+      failureThreshold: 90
+    readiness:
+      enabled: true
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      enabled: true
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+  # -- initContainer that waits for the in-cluster postgres/redis to accept
+  # TCP connections (compose `depends_on: condition: service_healthy`).
+  initContainers:
+    enabled: true
+    image: busybox:1.36
+
+  # -- Persistent data. Every entry becomes its own PVC (or uses
+  # existingClaim); `storageClass: ""` falls back to the top-level one.
+  persistence:
+    # Host media, mounted read-only like compose `${MEDIA_ROOT}:...:ro`.
+    media:
+      size: 100Gi
+      storageClass: ""
+      existingClaim: ""
+      mountPath: /mnt/media
+      readOnly: true
+    # Ownership taken by Silo on start; survives image updates.
+    plugins:
+      size: 1Gi
+      mountPath: /var/lib/silo/plugins
+    artwork:
+      size: 10Gi
+      mountPath: /var/lib/silo/artwork
+    compat:
+      size: 1Gi
+      mountPath: /var/lib/silo/compat
+    transcode:
+      size: 10Gi
+      mountPath: /tmp/silo-transcode
+    # Prepared downloads; no storage budget applies until you set one
+    # (download.artifact_max_bytes in Settings > Downloads).
+    download-artifacts:
+      size: 10Gi
+      mountPath: /tmp/silo-download-artifacts
+    catalog-seeds:
+      size: 1Gi
+      mountPath: /catalog-seeds
+      readOnly: true
+
+  # -- Arbitrary extra env vars for the Silo container, e.g. the .env server
+  # settings the compose file loads from env_file (.env.example lists them:
+  # SILO_PUBLIC_URL, SILO_SMTP_HOST, ...) and the search wiring:
+  #   extraEnv:
+  #     - name: <search URL var per Silo's docs>
+  #       value: http://<release>-meilisearch:7700
+  extraEnv: []
+
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  podAnnotations: {}
+  podLabels: {}
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Exposure: one Service carrying all three listener ports
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  # -- e.g. cloud LoadBalancer annotations.
+  annotations: {}
+  # -- "" | Cluster | Local (only meaningful for NodePort/LoadBalancer).
+  externalTrafficPolicy: ""
+  # Port defaults mirror the compose host-side defaults. targetPort refers
+  # to the named container ports (the container always listens on
+  # 8080/8096/13378).
+  ports:
+    web:
+      port: 8090
+      targetPort: http
+    jellyfin:
+      port: 8096
+      targetPort: jellyfin
+    audiobookshelf:
+      port: 13378
+      targetPort: audiobookshelf
+
+# ---------------------------------------------------------------------------
+# Gateway API (gateway.networking.k8s.io/v1) — the modern replacement for
+# Ingress. Requires the Gateway API CRDs (standard channel, v1.0+) to be
+# installed in the cluster; they ship with neither Kubernetes nor this chart.
+# ---------------------------------------------------------------------------
+gateway:
+  enabled: false
+  # -- Hostnames for the web UI HTTPRoute (required when enabled).
+  hostnames: []
+  # -- parentRefs to attach the HTTPRoutes to. Leave empty when
+  # gateway.gateway.create=true (the chart wires them to its own Gateway);
+  # otherwise required, e.g.:
+  #   parentRefs:
+  #     - name: my-gateway
+  #       namespace: gateway-system   # optional
+  #       sectionName: https          # optional, targets one listener
+  parentRefs: []
+  # -- Chart-managed Gateway. gatewayClassName must reference a
+  # GatewayClass already installed in the cluster.
+  gateway:
+    create: false
+    gatewayClassName: ""
+    # -- Raw listeners list for the created Gateway. Default: one plain
+    # HTTP listener on port 80 allowing routes from the release namespace.
+    # Override to add TLS, e.g.:
+    #   listeners:
+    #     - name: https
+    #       port: 443
+    #       protocol: HTTPS
+    #       tls:
+    #         mode: Terminate
+    #         certificateRefs:
+    #           - group: ""
+    #             kind: Secret
+    #             name: my-cert
+    #       allowedRoutes:
+    #         namespaces:
+    #           from: Same
+    listeners: []
+  # -- Optional extra HTTPRoutes for the Jellyfin- / Audiobookshelf-
+  # compatible ports. Client apps usually expect a dedicated hostname (not a
+  # path prefix), so each gets its own hostname(s) and route.
+  jellyfin:
+    enabled: false
+    hostnames: []
+  audiobookshelf:
+    enabled: false
+    hostnames: []
