@@ -406,9 +406,31 @@ or install the packaged chart directly from the `main` branch:
 
 ```console
 helm install silo \
-  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.3.0.tgz \
+  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.3.1.tgz \
   --set silo.existingSecret=silo-secrets
 ```
+
+## Upgrades
+
+The StatefulSets' `volumeClaimTemplates` carry only version-stable labels
+(chart version labels there would make every `helm upgrade` fail with
+*"updates to statefulset spec ... are forbidden"*, since VCTs are immutable).
+Releases **≤ 0.3.0** had a version-bearing `helm.sh/chart` label on the VCTs;
+when upgrading from such a release to ≥ 0.3.1, recreate the StatefulSets
+**once** (the PVCs are never touched by a StatefulSet delete — data is
+preserved and re-adopted by the recreated StatefulSet):
+
+```console
+kubectl delete sts silo-postgres silo-redis silo-meilisearch silo-dragonfly \
+  --cascade=orphan --ignore-not-found
+helm repo update
+helm upgrade silo silo/silo --version 0.3.1 --reuse-values
+```
+
+(`--cascade=orphan` keeps the pods running while the objects are recreated;
+the new StatefulSet re-adopts them and rolls them onto the same PVCs.)
+After swapping redis → dragonfly, the old `data-silo-redis-0` PVC can be
+reclaimed once the DragonflyDB backend is verified working.
 
 ## Publishing
 

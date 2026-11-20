@@ -126,8 +126,11 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "silo.labels" . | nindent 10 }}
-          app.kubernetes.io/component: postgres
+          # Version-stable labels ONLY: volumeClaimTemplates are immutable in
+          # the StatefulSet spec, so a version-bearing label (helm.sh/chart)
+          # would fail every chart upgrade with "updates to statefulset spec
+          # ... are forbidden".
+          {{- include "silo.componentLabels" (dict "root" . "component" "postgres") | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.postgres.persistence.accessModes | nindent 10 }}

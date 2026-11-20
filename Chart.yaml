@@ -6,7 +6,7 @@ description: |
   Meilisearch — converted from the upstream docker-compose.advanced.yml
   multi-container layout into a single self-contained chart.
 type: application
-version: 0.3.0
+version: 0.3.1
 appVersion: "latest"
 kubeVersion: ">=1.25.0-0"
 home: https://siloserver.org

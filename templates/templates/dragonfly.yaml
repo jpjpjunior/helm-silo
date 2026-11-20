@@ -103,8 +103,8 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "silo.labels" . | nindent 10 }}
-          app.kubernetes.io/component: dragonfly
+          # Version-stable labels ONLY (see postgres.yaml VCT note).
+          {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.dragonfly.persistence.accessModes | nindent 10 }}
