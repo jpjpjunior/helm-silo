@@ -5,7 +5,32 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-20T04:08:28.05692416Z"
+    created: "2026-11-20T07:37:29.917458867Z"
+    description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
+      plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
+      from the upstream docker-compose.advanced.yml multi-container layout into a
+      single self-contained chart. '
+    digest: 5c3001e13750461af079ca0840d89ad423e83e1f3feb8860de64aa2b34f1799d
+    home: https://siloserver.org
+    keywords:
+    - media
+    - streaming
+    - jellyfin
+    - audiobookshelf
+    - postgresql
+    - redis
+    - meilisearch
+    kubeVersion: '>=1.25.0-0'
+    name: silo
+    type: application
+    urls:
+    - https://jpjpjunior.github.io/helm-silo/silo-0.2.1.tgz
+    version: 0.2.1
+  - annotations:
+      category: Media
+    apiVersion: v2
+    appVersion: latest
+    created: "2026-11-20T07:37:29.916504489Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
       from the upstream docker-compose.advanced.yml multi-container layout into a
@@ -26,4 +51,4 @@ entries:
     urls:
     - https://jpjpjunior.github.io/helm-silo/silo-0.2.0.tgz
     version: 0.2.0
-generated: "2026-11-20T04:08:28.055792614Z"
+generated: "2026-11-20T07:37:29.91529385Z"
