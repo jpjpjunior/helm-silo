@@ -1,0 +1,7 @@
+# Scenario K: both cache backends enabled (expected render FAILURE)
+silo:
+  existingSecret: silo-secrets
+redis:
+  enabled: true
+dragonfly:
+  enabled: true

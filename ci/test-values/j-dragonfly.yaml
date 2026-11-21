@@ -1,0 +1,7 @@
+# Scenario J: DragonflyDB replaces the in-cluster Redis
+silo:
+  existingSecret: silo-secrets
+redis:
+  enabled: false
+dragonfly:
+  enabled: true

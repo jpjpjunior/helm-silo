@@ -1,0 +1,3 @@
+# Scenario A: stock install (offline render needs an existingSecret name)
+silo:
+  existingSecret: silo-secrets

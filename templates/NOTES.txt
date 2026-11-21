@@ -1,0 +1,49 @@
+{{/*
+Post-install notes. Rendered by helm install/upgrade/lint; `helm template`
+does not render NOTES.txt.
+*/}}
+{{- $fullname := include "silo.fullname" . -}}
+{{- $cacheHost := printf "%s-%s" $fullname (ternary "dragonfly" "redis" .Values.dragonfly.enabled) -}}
+
+Silo {{ .Chart.Version }} was deployed to namespace "{{ .Release.Namespace }}" as release "{{ .Release.Name }}".
+
+Endpoints — Service {{ $fullname }} (web / jellyfin-compat / audiobookshelf-compat):
+  kubectl get svc {{ $fullname }} -n {{ .Release.Namespace }} -o wide
+
+Port-forward the web UI for a quick look:
+  kubectl port-forward svc/{{ $fullname }} {{ .Values.service.ports.web.port }}:{{ .Values.service.ports.web.port }} -n {{ .Release.Namespace }}
+  → http://localhost:{{ .Values.service.ports.web.port }}
+{{- if .Values.gateway.enabled }}
+
+Gateway API HTTPRoutes are attached to
+{{- if .Values.gateway.gateway.create }} the chart-managed Gateway "{{ include "silo.gatewayName" . }}"{{- else }} your Gateway(s) (gateway.parentRefs){{- end }}:
+  web: {{ join ", " .Values.gateway.hostnames }}
+{{- if .Values.gateway.jellyfin.enabled }}
+  jellyfin-compat: {{ join ", " .Values.gateway.jellyfin.hostnames }}
+{{- end }}
+{{- if .Values.gateway.audiobookshelf.enabled }}
+  audiobookshelf-compat: {{ join ", " .Values.gateway.audiobookshelf.hostnames }}
+{{- end }}
+{{- end }}
+
+Backends:
+  PostgreSQL{{- if .Values.postgres.enabled }}: {{ $fullname }}-postgres (in-cluster). Generated credentials:
+      kubectl get secret {{ $fullname }}-postgres-auth -n {{ .Release.Namespace }} \
+        -o jsonpath='{.data.postgres-password}' | base64 -d
+  {{- else }}: external (silo.databaseUrlOverride)
+  {{- end }}
+  Cache: {{ ternary "DragonflyDB" "Redis" .Values.dragonfly.enabled }}{{- if or .Values.redis.enabled .Values.dragonfly.enabled }} at {{ $cacheHost }}:6379 (in-cluster){{- else }} at the URL in silo.redisUrlOverride{{- end }}
+{{- if not .Values.silo.existingSecret }}
+
+The SECRET_KEY is stored in the chart-managed Secret "{{ $fullname }}-silo-auth".
+Back it up apart from your database dumps — without it, encrypted credentials
+cannot be recovered.
+{{- end }}
+
+Data safety: the data PVCs carry helm.sh/resource-policy: keep, so `helm
+uninstall` leaves every volume (media, plugins, artwork, postgres, ...) in
+place. Reclaim them deliberately:
+  kubectl delete pvc -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Smoke-check the release any time:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

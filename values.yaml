@@ -26,6 +26,27 @@ serviceAccount:
   automountServiceAccountToken: false
 
 # ---------------------------------------------------------------------------
+# Network isolation (opt-in). Creates default-deny-ingress NetworkPolicies
+# for the in-cluster datastores (postgres, redis/dragonfly, meilisearch) and
+# allows traffic only from this release's Silo pods in the same namespace.
+# Requires a CNI that enforces NetworkPolicy (Calico/Cilium/... do; flannel
+# does NOT). Raw NetworkPolicy `ingress` items appended to every datastore
+# policy via extraIngress allow more sources (admin pods, monitoring).
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  extraIngress: []
+
+# ---------------------------------------------------------------------------
+# `helm test <release>` hook: a small busybox Job that TCP-checks the Silo
+# service and the enabled datastores (mirrors the wait-for-datastores
+# init container).
+# ---------------------------------------------------------------------------
+tests:
+  enabled: true
+  image: busybox:1.36
+
+# ---------------------------------------------------------------------------
 # PostgreSQL (pgvector image, as in compose)
 # ---------------------------------------------------------------------------
 postgres:
@@ -45,6 +66,12 @@ postgres:
     # render time.
     existingSecret: ""
     existingSecretPasswordKey: postgres-password
+    # -- Key in `existingSecret` holding the FULL postgres:// URL. When set,
+    # the Deployment takes DATABASE_URL from that secret via valueFrom and
+    # the password never appears in the pod spec. Leave empty to keep the
+    # legacy render-time assembly (URL, password included, visible in the
+    # pod spec).
+    existingSecretUrlKey: ""
   # -- compose `shm_size: 8gb`: mounted as a tmpfs (emptyDir medium: Memory)
   # at /dev/shm. Empty string mounts it without a size limit.
   shmSize: 8Gi
@@ -73,7 +100,10 @@ redis:
   enabled: true
   image:
     repository: redis
-    tag: alpine
+    # Pinned minor: the floating `alpine` tag crosses majors without
+    # warning (chart pins dragonfly/meilisearch for the same reason).
+    # Bump deliberately.
+    tag: 8.4-alpine
     pullPolicy: IfNotPresent
   persistence:
     size: 8Gi

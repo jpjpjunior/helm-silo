@@ -1,0 +1,4 @@
+# Scenario I: non-root mode without an external DB (expected render FAILURE)
+silo:
+  existingSecret: silo-secrets
+  nonRootMode: true

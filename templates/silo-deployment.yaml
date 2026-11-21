@@ -31,13 +31,18 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "silo.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
-      # PUID:PGID, as in compose; fsGroup makes the PVC mounts group-writable
-      # for that account.
+      # The Silo image's s6-overlay init MUST start as root and then drops
+      # privileges to PUID:PGID itself — exactly how the compose stack runs
+      # (no `user:`). Forcing runAsUser here makes the init abort with
+      # "Started as uid ..., but this image's init needs root".
+      # fsGroup still makes PVC mounts group-accessible for PGID.
       securityContext:
+        fsGroup: {{ .Values.silo.pgid }}
+        {{- if .Values.silo.nonRootMode }}
         runAsUser: {{ .Values.silo.puid }}
         runAsGroup: {{ .Values.silo.pgid }}
-        fsGroup: {{ .Values.silo.pgid }}
-        runAsNonRoot: {{ ne (int .Values.silo.puid) 0 }}
+        runAsNonRoot: true
+        {{- end }}
       # compose stop_grace_period: 2m
       terminationGracePeriodSeconds: {{ .Values.silo.terminationGracePeriodSeconds }}
       {{- if .Values.silo.transcode.nvidia.enabled }}
@@ -67,8 +72,9 @@ spec:
               {{- if .Values.postgres.enabled }}
               until nc -z -w2 {{ include "silo.fullname" . }}-postgres 5432; do echo "waiting for postgres..."; sleep 2; done
               {{- end }}
-              {{- if .Values.redis.enabled }}
-              until nc -z -w2 {{ include "silo.fullname" . }}-redis 6379; do echo "waiting for redis..."; sleep 2; done
+              {{- if or .Values.redis.enabled .Values.dragonfly.enabled }}
+              {{- $cacheHost := printf "%s-%s" (include "silo.fullname" .) (.Values.dragonfly.enabled | ternary "dragonfly" "redis") }}
+              until nc -z -w2 {{ $cacheHost }} 6379; do echo "waiting for cache backend..."; sleep 2; done
               {{- end }}
               echo "datastores are accepting connections"
       {{- end }}
@@ -76,6 +82,12 @@ spec:
         - name: silo
           image: "{{ .Values.silo.image.repository }}:{{ .Values.silo.image.tag }}"
           imagePullPolicy: {{ .Values.silo.image.pullPolicy }}
+          {{- if .Values.silo.nonRootMode }}
+          # Skip the image's s6 init (which needs root) and start the silo
+          # binary directly — the image's documented non-root escape hatch.
+          # Requires silo.databaseUrlOverride (external PostgreSQL).
+          command: [silo]
+          {{- end }}
           {{- if .Values.silo.capabilities }}
           # compose cap_add: [NET_ADMIN] (BBR congestion control / TCP send
           # buffer); set silo.capabilities to [] to remove.
@@ -117,10 +129,19 @@ spec:
             {{- if .Values.silo.databaseUrlOverride }}
             - name: DATABASE_URL
               value: {{ .Values.silo.databaseUrlOverride | quote }}
+            {{- else if and .Values.postgres.auth.existingSecret .Values.postgres.auth.existingSecretUrlKey }}
+            # Taken from the user's secret via valueFrom — the password never
+            # enters the rendered pod spec.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.auth.existingSecret }}
+                  key: {{ .Values.postgres.auth.existingSecretUrlKey }}
             {{- else if .Values.postgres.auth.existingSecret }}
             # Assembled from the existing secret at render time; the URL
-            # (including the password) ends up in the Deployment spec —
-            # prefer the chart-managed secret unless you need this branch.
+            # (including the password) ends up in the Deployment spec. Set
+            # postgres.auth.existingSecretUrlKey to take the URL from your
+            # secret via valueFrom instead.
             - name: DATABASE_URL
               value: {{ include "silo.databaseUrl" . | quote }}
             {{- else }}
@@ -135,7 +156,7 @@ spec:
               value: {{ .Values.silo.redisUrlOverride | quote }}
             {{- else }}
             - name: REDIS_URL
-              value: redis://{{ include "silo.fullname" . }}-redis:6379
+              value: {{ include "silo.redisUrl" . | quote }}
             {{- end }}
             - name: SILO_PLUGIN_CACHE_DIR
               value: /var/lib/silo/plugins
@@ -168,7 +189,8 @@ spec:
             failureThreshold: {{ .Values.silo.probes.liveness.failureThreshold }}
           {{- end }}
           volumeMounts:
-            {{- range $name, $vol := $.Values.silo.persistence }}
+            {{- range $name := keys $.Values.silo.persistence | sortAlpha }}
+            {{- $vol := index $.Values.silo.persistence $name }}
             - name: {{ $name }}
               mountPath: {{ $vol.mountPath }}
               {{- if $vol.readOnly }}
@@ -211,7 +233,8 @@ spec:
             {{- toYaml .Values.silo.resources | nindent 12 }}
           {{- end }}
       volumes:
-        {{- range $name, $vol := $.Values.silo.persistence }}
+        {{- range $name := keys $.Values.silo.persistence | sortAlpha }}
+        {{- $vol := index $.Values.silo.persistence $name }}
         - name: {{ $name }}
           persistentVolumeClaim:
             claimName: {{ $vol.existingClaim | default (printf "%s-%s" (include "silo.fullname" $) $name) }}

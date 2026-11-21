@@ -54,16 +54,18 @@ container/pod instead of Silo's omnibus single container.
 | Kind | Name | Purpose |
 | --- | --- | --- |
 | StatefulSet + headless Service | `<release>-postgres` | pgvector/pgvector:pg18, `listen_addresses=*`, `pg_stat_statements` preloaded |
-| StatefulSet + headless Service | `<release>-redis` | redis:alpine (default cache backend) |
+| StatefulSet + headless Service | `<release>-redis` | redis:8.4-alpine (pinned minor, default cache backend) |
 | StatefulSet + headless Service | `<release>-meilisearch` | getmeili/meilisearch:v1.54.0 (pinned), only with `meilisearch.enabled=true` |
 | StatefulSet + headless Service | `<release>-dragonfly` | DragonflyDB v2.0.2 (pinned), only with `dragonfly.enabled=true` — replaces the Redis one |
 | Deployment | `<release>` | Silo itself |
 | Service | `<release>` | one Service carrying web (8090→8080), jellyfin (8096), audiobookshelf (13378) |
 | PVCs | `<release>-{media,plugins,artwork,compat,transcode,download-artifacts,catalog-seeds}` | silo's data directories |
 | PVCs | via volumeClaimTemplates | postgres / redis / dragonfly / meilisearch data |
-| Secret | `<release>-postgres-auth` | generated PostgreSQL password + assembled `DATABASE_URL` (skipped when you bring `postgres.auth.existingSecret`) |
+| Secret | `<release>-postgres-auth` | generated PostgreSQL password + assembled `DATABASE_URL` (skipped when you bring `postgres.auth.existingSecret`; with `existingSecretUrlKey` the URL comes from your secret via valueFrom) |
 | Gateway (optional) | `<release>-gateway` | only with `gateway.gateway.create=true`; otherwise HTTPRoutes attach to your existing Gateway |
 | HTTPRoute(s) (optional) | `<release>` (+ `<release>-jellyfin`, `<release>-audiobookshelf`) | only with `gateway.enabled=true` |
+| NetworkPolicy(s) (optional) | `<release>-{postgres,redis,dragonfly,meilisearch}` | default-deny ingress per datastore, only with `networkPolicy.enabled=true` |
+| Job (helm test hook) | `<release>-test` | TCP smoke checks; run with `helm test <release>` |
 
 ## docker-compose → chart mapping
 
@@ -158,9 +160,12 @@ chart fails rendering if `databaseUrlOverride` is missing in this mode.
     redisUrlOverride: redis://my-redis:6379
   ```
 
-  Note: with `databaseUrlOverride` (or `postgres.auth.existingSecret`) the
-  `DATABASE_URL` is rendered into the Deployment spec as plain text, so
-  restrict `kubectl get deployment` access accordingly.
+  Note: with `databaseUrlOverride` (or `postgres.auth.existingSecret` without
+  `existingSecretUrlKey`) the `DATABASE_URL` is rendered into the Deployment
+  spec as plain text, so restrict `kubectl get deployment` access accordingly.
+  With `postgres.auth.existingSecret` + `postgres.auth.existingSecretUrlKey`
+  the URL is pulled from your secret via `valueFrom` and never appears in the
+  pod spec.
 
 ### Cache backend: Redis or DragonflyDB
 
@@ -337,6 +342,17 @@ at render time: enabling the gateway without hostnames, without a parent
 (`parentRefs` or `gateway.create`), or with `create=true` but no
 `gatewayClassName`.
 
+### Network isolation (optional)
+
+`networkPolicy.enabled=true` creates a default-deny-ingress NetworkPolicy for
+each in-cluster datastore (postgres, redis/dragonfly, meilisearch) that allows
+traffic only from this release's Silo pods in the same namespace. Requires a
+CNI that enforces NetworkPolicy (Calico/Cilium/kube-router do; flannel does
+not). Extra sources — an admin pod, a monitoring scraper — go through
+`networkPolicy.extraIngress` (raw NetworkPolicy `ingress` items, appended to
+every datastore policy), or disable the policies if you run cross-namespace
+database tooling.
+
 ## Migrating from docker compose
 
 There is no in-place upgrade: Kubernetes reads different volumes. A manual
@@ -389,6 +405,11 @@ migration is:
 | `gateway.parentRefs` | `[]` | attach to an existing Gateway |
 | `gateway.gateway.create` | `false` | chart-managed Gateway (needs `gatewayClassName`) |
 | `gateway.jellyfin.*` / `gateway.audiobookshelf.*` | disabled | optional HTTPRoutes for the compat ports |
+| `redis.image.tag` | `8.4-alpine` | pinned minor; bump deliberately |
+| `postgres.auth.existingSecretUrlKey` | `""` | take `DATABASE_URL` from your secret via valueFrom |
+| `networkPolicy.enabled` | `false` | default-deny ingress on the datastores |
+| `networkPolicy.extraIngress` | `[]` | extra ingress rules appended to each policy |
+| `tests.enabled` | `true` | `helm test` smoke-check hook |
 
 ## Install from this repository
 
@@ -406,7 +427,7 @@ or install the packaged chart directly from the `main` branch:
 
 ```console
 helm install silo \
-  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.3.1.tgz \
+  https://raw.githubusercontent.com/jpjpjunior/helm-silo/main/silo-0.4.0.tgz \
   --set silo.existingSecret=silo-secrets
 ```
 
@@ -424,7 +445,7 @@ preserved and re-adopted by the recreated StatefulSet):
 kubectl delete sts silo-postgres silo-redis silo-meilisearch silo-dragonfly \
   --cascade=orphan --ignore-not-found
 helm repo update
-helm upgrade silo silo/silo --version 0.3.1 --reuse-values
+helm upgrade silo silo/silo --version 0.4.0 --reuse-values
 ```
 
 (`--cascade=orphan` keeps the pods running while the objects are recreated;
@@ -432,9 +453,35 @@ the new StatefulSet re-adopts them and rolls them onto the same PVCs.)
 After swapping redis → dragonfly, the old `data-silo-redis-0` PVC can be
 reclaimed once the DragonflyDB backend is verified working.
 
-## Publishing
+## Uninstall & data safety
 
-Keep `main` as the chart source: edit the chart, `helm package silo/ -d .`,
+All data PVCs (the seven chart-managed silo volumes and the StatefulSet
+claims) carry the `helm.sh/resource-policy: keep` annotation, so
+`helm uninstall` never deletes data — the claims stay behind. Reclaim them
+deliberately when you really want them gone:
+
+```console
+kubectl delete pvc -l app.kubernetes.io/instance=silo -n <namespace>
+```
+
+## Publishing (CI)
+
+`.github/workflows/chart.yml` validates every push to `main`: `helm lint`
+(which exercises `values.schema.json` and `NOTES.txt`), the chart validator
+(`ci/validate_chart.py`, 12+ scenarios), and kubeconform.
+
+Releasing is a tag — the workflow packages the chart, commits the `.tgz` to
+`main` and updates the index on `gh-pages` with the built-in `GITHUB_TOKEN`
+(no personal access token involved):
+
+```console
+# after bumping version in Chart.yaml and committing:
+git tag v0.4.0
+git push origin main v0.4.0
+```
+
+The tag must match `Chart.yaml`'s version (the workflow verifies it). Manual
+publishing still works if Actions are unavailable: `helm package . -d .`,
 regenerate the index on `gh-pages` (`helm repo index . --url
 https://jpjpjunior.github.io/helm-silo`), and push both branches. Add
 yourself to `maintainers` in `Chart.yaml`, and optionally submit the repo to

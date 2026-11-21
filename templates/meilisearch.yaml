@@ -105,8 +105,8 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "silo.labels" . | nindent 10 }}
-          app.kubernetes.io/component: meilisearch
+          # Version-stable labels ONLY (see postgres.yaml VCT note).
+          {{- include "silo.componentLabels" (dict "root" . "component" "meilisearch") | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.meilisearch.persistence.accessModes | nindent 10 }}

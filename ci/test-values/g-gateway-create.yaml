@@ -1,0 +1,10 @@
+# Scenario G: chart-managed Gateway with default HTTP listener
+silo:
+  existingSecret: silo-secrets
+gateway:
+  enabled: true
+  hostnames:
+    - silo.example.com
+  gateway:
+    create: true
+    gatewayClassName: envoy

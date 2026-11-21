@@ -1,6 +1,7 @@
 {{/* One PVC per silo.persistence entry, unless the entry points at an
      existing claim. Key names become the claim suffix (e.g. <fullname>-media). */}}
-{{- range $name, $vol := .Values.silo.persistence }}
+{{- range $name := keys .Values.silo.persistence | sortAlpha }}
+{{- $vol := index $.Values.silo.persistence $name }}
 {{- if not $vol.existingClaim }}
 ---
 apiVersion: v1
@@ -10,6 +11,10 @@ metadata:
   labels:
     {{- include "silo.labels" $ | nindent 4 }}
     app.kubernetes.io/component: silo
+  annotations:
+    # Survives helm uninstall — deleting the release must not delete data.
+    # Reclaim deliberately afterwards: kubectl delete pvc <name>
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     {{- $vol.accessModes | default (list "ReadWriteOnce") | toYaml | nindent 4 }}

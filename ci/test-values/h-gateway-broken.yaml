@@ -1,0 +1,7 @@
+# Scenario H: gateway enabled but nothing to attach to (expected render FAILURE)
+silo:
+  existingSecret: silo-secrets
+gateway:
+  enabled: true
+  hostnames:
+    - silo.example.com

@@ -1,0 +1,14 @@
+# Scenario C: external postgres/redis (CloudNativePG-style) + existing media
+# claim + non-root mode (external DB satisfies the nonRootMode requirement)
+postgres:
+  enabled: false
+redis:
+  enabled: false
+silo:
+  existingSecret: silo-secrets
+  nonRootMode: true
+  databaseUrlOverride: postgres://silo:dbpass@my-cluster:5432/silo?sslmode=disable
+  redisUrlOverride: redis://my-redis:6379
+  persistence:
+    media:
+      existingClaim: media-nfs

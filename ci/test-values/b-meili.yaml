@@ -1,0 +1,11 @@
+# Scenario B: defaults + Meilisearch enabled + extraEnv wiring example
+silo:
+  existingSecret: silo-secrets
+  extraEnv:
+    - name: SILO_PUBLIC_URL
+      value: https://silo.example.com
+    - name: SILO_MEILI_URL
+      value: http://silo-meilisearch:7700
+meilisearch:
+  enabled: true
+  masterKey: test-master-key-12345678901234567890

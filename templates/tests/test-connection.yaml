@@ -1,0 +1,52 @@
+{{/* `helm test` hook: TCP smoke checks against the Silo service and the
+     enabled datastores (same checks as the wait-for-datastores init
+     container). */}}
+{{- if .Values.tests.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "silo.fullname" . }}-test
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 180
+  template:
+    metadata:
+      name: {{ include "silo.fullname" . }}-test
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: smoke
+          image: {{ .Values.tests.image }}
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c]
+          args:
+            - |
+              check() {
+                host="$1"; port="$2"; label="$3"; tries=0
+                until nc -z -w2 "$host" "$port" 2>/dev/null; do
+                  tries=$((tries+1))
+                  if [ "$tries" -ge 15 ]; then echo "FAIL: $label ($host:$port)"; return 1; fi
+                  sleep 2
+                done
+                echo "ok: $label ($host:$port)"
+              }
+              {{- $fullname := include "silo.fullname" . }}
+              check {{ $fullname }} {{ .Values.service.ports.web.port }} "silo web" || exit 1
+              {{- if .Values.postgres.enabled }}
+              check {{ $fullname }}-postgres 5432 "postgres" || exit 1
+              {{- end }}
+              {{- if or .Values.redis.enabled .Values.dragonfly.enabled }}
+              check {{ $fullname }}-{{ .Values.dragonfly.enabled | ternary "dragonfly" "redis" }} 6379 "cache backend" || exit 1
+              {{- end }}
+              {{- if .Values.meilisearch.enabled }}
+              check {{ $fullname }}-meilisearch 7700 "meilisearch" || exit 1
+              {{- end }}
+              echo "all smoke checks passed"
+{{- end }}

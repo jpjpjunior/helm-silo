@@ -1,0 +1,115 @@
+{{/* Opt-in network isolation: default-deny-ingress NetworkPolicies for the
+     in-cluster datastores, allowing only this release's Silo pods (same
+     namespace). Requires a CNI that enforces NetworkPolicy (flannel does
+     not). networkPolicy.extraIngress (raw `ingress` items) is appended to
+     every policy to allow more sources. */}}
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "silo.fullname" . }}-postgres
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "silo.componentLabels" (dict "root" . "component" "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "silo.fullname" . }}-redis
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "silo.componentLabels" (dict "root" . "component" "redis") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.dragonfly.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "silo.fullname" . }}-dragonfly
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dragonfly
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.meilisearch.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "silo.fullname" . }}-meilisearch
+  labels:
+    {{- include "silo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meilisearch
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "silo.componentLabels" (dict "root" . "component" "meilisearch") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 7700
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

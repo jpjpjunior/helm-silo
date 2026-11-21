@@ -1,0 +1,19 @@
+# Scenario F: Gateway API attached to an existing Gateway + compat routes
+silo:
+  existingSecret: silo-secrets
+gateway:
+  enabled: true
+  hostnames:
+    - silo.example.com
+  parentRefs:
+    - name: my-gateway
+      namespace: gateway-system
+      sectionName: https
+  jellyfin:
+    enabled: true
+    hostnames:
+      - jellyfin.example.com
+  audiobookshelf:
+    enabled: true
+    hostnames:
+      - audiobooks.example.com

@@ -1,0 +1,14 @@
+# Scenario D: GPU + VA-API + hostProc + no NET_ADMIN + LoadBalancer
+silo:
+  existingSecret: silo-secrets
+  capabilities: []
+  transcode:
+    nvidia:
+      enabled: true
+      count: 1
+    vaapi:
+      enabled: true
+  hostProc:
+    enabled: true
+service:
+  type: LoadBalancer

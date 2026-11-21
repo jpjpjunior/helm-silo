@@ -1,0 +1,60 @@
+name: chart
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: helm lint (exercises values.schema.json + NOTES.txt)
+        run: helm lint .
+      - name: chart validator (render scenarios + assertions)
+        run: |
+          pip install pyyaml
+          CHART_DIR=. TEST_VALUES_DIR=ci/test-values python ci/validate_chart.py
+      - name: kubeconform (strict, missing CRD schemas ignored)
+        run: |
+          curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kc.tar.gz -C /tmp
+          helm template rel . | /tmp/kubeconform -strict -ignore-missing-schemas
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: tag matches Chart.yaml version
+        run: |
+          chart_version=$(awk '/^version:/{print $2}' Chart.yaml)
+          test "v${chart_version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v${chart_version}"; exit 1; }
+      - name: package + commit tgz to main + index gh-pages
+        run: |
+          helm package . -d .
+          git config user.name "chart-bot"
+          git config user.email "chart-bot@users.noreply.github.com"
+          git add silo-*.tgz
+          git commit -m "package ${GITHUB_REF_NAME}"
+          git push origin HEAD:main
+          git fetch origin gh-pages
+          git worktree add gh-pages origin/gh-pages
+          cp silo-*.tgz gh-pages/
+          ( cd gh-pages && helm repo index . --url https://jpjpjunior.github.io/helm-silo \
+            && git add -A && git commit -m "gh-pages: add ${GITHUB_REF_NAME}" \
+            && git push origin gh-pages )
