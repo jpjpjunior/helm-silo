@@ -21,7 +21,8 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "extraIngress": { "type": "array", "items": { "type": "object" } }
+        "extraIngress": { "type": "array", "items": { "type": "object" } },
+        "extraEgress": { "type": "array", "items": { "type": "object" } }
       },
       "additionalProperties": false
     },
@@ -50,6 +51,8 @@
           },
           "additionalProperties": false
         },
+        "dropAllCapabilities": { "type": "boolean" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
         "shmSize": { "type": "string" },
         "args": { "type": "array", "items": { "type": "string" } },
         "persistence": { "$ref": "#/definitions/persistence" },
@@ -66,6 +69,8 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "$ref": "#/definitions/image" },
+        "dropAllCapabilities": { "type": "boolean" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
         "resources": { "type": "object" },
@@ -80,6 +85,8 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "$ref": "#/definitions/image" },
+        "dropAllCapabilities": { "type": "boolean" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
         "args": { "type": "array", "items": { "type": "string" } },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
@@ -95,6 +102,8 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "$ref": "#/definitions/image" },
+        "dropAllCapabilities": { "type": "boolean" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
         "masterKey": { "type": "string" },
         "existingSecret": { "type": "string" },
         "existingSecretKey": { "type": "string" },
@@ -125,6 +134,7 @@
         "terminationGracePeriodSeconds": { "type": "integer" },
         "updateStrategy": { "type": "string", "enum": ["Recreate", "RollingUpdate"] },
         "capabilities": { "type": "array", "items": { "type": "string" } },
+        "dropAllCapabilities": { "type": "boolean" },
         "transcode": {
           "type": "object",
           "properties": {

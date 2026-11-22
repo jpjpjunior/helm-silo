@@ -61,6 +61,23 @@ spec:
         - name: dragonfly
           image: "{{ .Values.dragonfly.image.repository }}:{{ .Values.dragonfly.image.tag }}"
           imagePullPolicy: {{ .Values.dragonfly.image.pullPolicy }}
+          {{- if or .Values.dragonfly.dropAllCapabilities .Values.dragonfly.capabilities }}
+          # Drop ALL default Linux capabilities; the image execs the server
+          # directly (no chown/privilege-drop entrypoint), so by default
+          # nothing is re-added. Add one via dragonfly.capabilities if an
+          # image update ever needs it; dropAllCapabilities: false restores
+          # the full default set.
+          securityContext:
+            capabilities:
+              {{- if .Values.dragonfly.dropAllCapabilities }}
+              drop:
+                - ALL
+              {{- end }}
+              {{- if .Values.dragonfly.capabilities }}
+              add:
+                {{- toYaml .Values.dragonfly.capabilities | nindent 16 }}
+              {{- end }}
+          {{- end }}
           args:
             {{- toYaml .Values.dragonfly.args | nindent 12 }}
           env:

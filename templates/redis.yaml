@@ -58,6 +58,21 @@ spec:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
           imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          {{- if or .Values.redis.dropAllCapabilities .Values.redis.capabilities }}
+          # Drop ALL default Linux capabilities, then re-add only what the
+          # image entrypoint needs (data-dir chown, gosu privilege drop).
+          # dropAllCapabilities: false restores the full default set.
+          securityContext:
+            capabilities:
+              {{- if .Values.redis.dropAllCapabilities }}
+              drop:
+                - ALL
+              {{- end }}
+              {{- if .Values.redis.capabilities }}
+              add:
+                {{- toYaml .Values.redis.capabilities | nindent 16 }}
+              {{- end }}
+          {{- end }}
           env:
             {{- with .Values.redis.extraEnv }}
             {{- toYaml . | nindent 12 }}

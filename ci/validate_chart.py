@@ -89,14 +89,20 @@ def a_default(ds):
     imgs = {x["name"]: x["image"] for x in pg}
     check(imgs.get("postgres") == "pgvector/pgvector:pg18", f"A: postgres image ({imgs.get('postgres')})")
     check(imgs.get("redis") == "redis:8.4-alpine", f"A: redis image pinned ({imgs.get('redis')})")
+    for x in pg:
+        cc = x.get("securityContext", {}).get("capabilities", {})
+        check(cc.get("drop") == ["ALL"], f"A: {x['name']} drops ALL caps")
+        check(cc.get("add") == ["CHOWN", "FOWNER", "SETGID", "SETUID"], f"A: {x['name']} minimal caps ({cc.get('add')})")
     # securityContext / strategy / grace
     ps = dep["spec"]["template"]["spec"]["securityContext"]
     check(ps.get("fsGroup") == 1000 and "runAsUser" not in ps and not ps.get("runAsNonRoot"), "A: pod starts as root for s6 init (fsGroup=pgid, no runAsUser)")
     check(get_env(dep, "PUID") and get_env(dep, "PUID")["value"] == "1000" and get_env(dep, "PGID")["value"] == "1000", "A: PUID/PGID env vars for s6 privilege drop")
     check(dep["spec"]["strategy"]["type"] == "Recreate", "A: Recreate strategy")
     check(dep["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 120, "A: terminationGracePeriodSeconds 120")
-    caps = c.get("securityContext", {}).get("capabilities", {}).get("add", [])
-    check(caps == ["NET_ADMIN"], f"A: NET_ADMIN capability ({caps})")
+    capsc = c.get("securityContext", {}).get("capabilities", {})
+    check(capsc.get("drop") == ["ALL"], f"A: silo drops ALL caps ({capsc.get('drop')})")
+    check(capsc.get("add") == ["CHOWN", "FOWNER", "DAC_OVERRIDE", "SETGID", "SETUID", "NET_ADMIN"],
+          f"A: silo init baseline + NET_ADMIN ({capsc.get('add')})")
     # env
     e = get_env(dep, "DATABASE_URL")
     check(e and "valueFrom" in e and "value" not in e, "A: DATABASE_URL via secretKeyRef (no plaintext in manifest)")
@@ -154,6 +160,8 @@ def b_meili(ds):
     msts = [s for s in by_kind(ds, "StatefulSet") if s["metadata"]["name"] == "silo-meilisearch"][0]
     mc = msts["spec"]["template"]["spec"]["containers"][0]
     check(mc["image"] == "getmeili/meilisearch:v1.54.0", "B: meili pinned image")
+    mcc = mc.get("securityContext", {}).get("capabilities", {})
+    check(mcc.get("drop") == ["ALL"] and not mcc.get("add"), f"B: meili drop ALL, nothing re-added ({mcc})")
     envs = {e["name"]: e for e in mc["env"]}
     check("MEILI_MASTER_KEY" in envs and "valueFrom" in envs["MEILI_MASTER_KEY"], "B: MEILI_MASTER_KEY via secretKeyRef")
     check(envs["MEILI_UPGRADE_DB"]["value"] == "false", "B: MEILI_UPGRADE_DB false")
@@ -192,7 +200,8 @@ def d_gpu(ds):
     res = c.get("resources", {})
     check(res.get("requests", {}).get("nvidia.com/gpu") == 1 and res.get("limits", {}).get("nvidia.com/gpu") == 1, "D: nvidia.com/gpu claim 1")
     caps = c.get("securityContext", {}).get("capabilities", {})
-    check("add" not in caps, "D: no NET_ADMIN (capabilities: [])")
+    check(caps.get("drop") == ["ALL"], "D: drop ALL retained (capabilities: [])")
+    check("NET_ADMIN" not in caps.get("add", []), "D: no NET_ADMIN (capabilities: [])")
     hp = [v for v in spec["volumes"] if v["name"].startswith("host-proc-")]
     check(len(hp) == 3 and all(v["hostPath"]["path"].startswith("/proc/") for v in hp), "D: 3 /proc hostPath mounts")
     va = [v for v in spec["volumes"] if v["name"] == "vaapi"]
@@ -243,6 +252,8 @@ def j_dragonfly(ds):
     df = [s for s in stss if s["metadata"]["name"] == "silo-dragonfly"][0]
     c = df["spec"]["template"]["spec"]["containers"][0]
     check(c["image"] == "docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2", f"J: pinned dragonfly image ({c['image']})")
+    dcc = c.get("securityContext", {}).get("capabilities", {})
+    check(dcc.get("drop") == ["ALL"] and not dcc.get("add"), f"J: dragonfly drop ALL, nothing re-added ({dcc})")
     args = c.get("args", [])
     check("--proactor_threads=1" in args and "--alsologtostderr" in args, f"J: default flags ({args})")
     check(c["readinessProbe"]["tcpSocket"]["port"] == "redis", "J: tcpSocket readiness on 6379")
@@ -310,8 +321,8 @@ def n_schema_typo():
 
 def p_networkpolicy():
     """Opt-in NetworkPolicies: none by default; when enabled, one
-    default-deny policy per in-cluster datastore allowing only silo pods,
-    with extraIngress appended."""
+    default-deny (ingress+egress) policy per in-cluster datastore allowing
+    only silo + helm-test pods in, with extraIngress appended."""
     ds0 = docs(render(f"{TV}/a-defaults.yaml"))
     check(len(by_kind(ds0, "NetworkPolicy")) == 0, "P: no NetworkPolicies by default")
     p = subprocess.run([HELM, "template", "silo", CHART, "-f", f"{TV}/a-defaults.yaml",
@@ -331,8 +342,11 @@ def p_networkpolicy():
     pg = pg[0]
     sel = pg["spec"]["podSelector"]["matchLabels"]
     check(sel.get("app.kubernetes.io/component") == "postgres", "P: policy selects postgres pods")
-    from0 = pg["spec"]["ingress"][0]["from"][0]["podSelector"]["matchLabels"]
-    check(from0.get("app.kubernetes.io/component") == "silo", "P: ingress allows only silo pods")
+    check(pg["spec"].get("policyTypes") == ["Ingress", "Egress"], "P: Ingress+Egress policyTypes")
+    check(pg["spec"].get("egress") == [], "P: datastore egress denied (deny-all)")
+    froms = [f["podSelector"]["matchLabels"].get("app.kubernetes.io/component")
+             for f in pg["spec"]["ingress"][0]["from"]]
+    check(froms == ["silo", "test"], f"P: ingress from silo + helm-test pods ({froms})")
     ports = [x["port"] for x in pg["spec"]["ingress"][0]["ports"]]
     check(ports == [5432], f"P: postgres port 5432 ({ports})")
     check(len(pg["spec"]["ingress"]) == 2, "P: extraIngress appended as second ingress item")

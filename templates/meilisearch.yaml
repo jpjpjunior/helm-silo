@@ -59,6 +59,22 @@ spec:
         - name: meilisearch
           image: "{{ .Values.meilisearch.image.repository }}:{{ .Values.meilisearch.image.tag }}"
           imagePullPolicy: {{ .Values.meilisearch.image.pullPolicy }}
+          {{- if or .Values.meilisearch.dropAllCapabilities .Values.meilisearch.capabilities }}
+          # Drop ALL default Linux capabilities; the image runs as its own
+          # non-root user, so by default nothing is re-added. Add one via
+          # meilisearch.capabilities if an image update ever needs it;
+          # dropAllCapabilities: false restores the full default set.
+          securityContext:
+            capabilities:
+              {{- if .Values.meilisearch.dropAllCapabilities }}
+              drop:
+                - ALL
+              {{- end }}
+              {{- if .Values.meilisearch.capabilities }}
+              add:
+                {{- toYaml .Values.meilisearch.capabilities | nindent 16 }}
+              {{- end }}
+          {{- end }}
           env:
             - name: MEILI_MASTER_KEY
               valueFrom:

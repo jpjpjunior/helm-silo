@@ -88,13 +88,27 @@ spec:
           # Requires silo.databaseUrlOverride (external PostgreSQL).
           command: [silo]
           {{- end }}
-          {{- if .Values.silo.capabilities }}
-          # compose cap_add: [NET_ADMIN] (BBR congestion control / TCP send
-          # buffer); set silo.capabilities to [] to remove.
+          {{- if or .Values.silo.dropAllCapabilities .Values.silo.capabilities }}
+          # Drop the default capability set, then re-add only what the image
+          # needs: the s6 root init chowns data dirs and drops to PUID:PGID
+          # (baseline), plus compose cap_add: [NET_ADMIN] for BBR / TCP send
+          # buffer. silo.dropAllCapabilities=false keeps the full default
+          # set (compose parity); silo.capabilities=[] drops only the extras.
           securityContext:
             capabilities:
+              {{- if .Values.silo.dropAllCapabilities }}
+              drop:
+                - ALL
+              {{- end }}
+              {{- $base := list "CHOWN" "FOWNER" "DAC_OVERRIDE" "SETGID" "SETUID" }}
+              {{- $add := .Values.silo.capabilities }}
+              {{- if not .Values.silo.nonRootMode }}
+              {{- $add = concat $base $add }}
+              {{- end }}
+              {{- if $add }}
               add:
-                {{- toYaml .Values.silo.capabilities | nindent 16 }}
+                {{- toYaml $add | nindent 16 }}
+              {{- end }}
           {{- end }}
           ports:
             - name: http

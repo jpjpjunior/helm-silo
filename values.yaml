@@ -36,6 +36,14 @@ serviceAccount:
 networkPolicy:
   enabled: false
   extraIngress: []
+  # -- Raw NetworkPolicy `egress` items appended to every datastore policy
+  # (default: deny-all egress — a datastore never initiates connections).
+  # E.g. allow cluster DNS if an image ever needs to resolve names:
+  #   - to:
+  #       - namespaceSelector:
+  #           matchLabels: { kubernetes.io/metadata.name: kube-system }
+  #     ports: [{ protocol: UDP, port: 53 }]
+  extraEgress: []
 
 # ---------------------------------------------------------------------------
 # `helm test <release>` hook: a small busybox Job that TCP-checks the Silo
@@ -72,6 +80,16 @@ postgres:
     # legacy render-time assembly (URL, password included, visible in the
     # pod spec).
     existingSecretUrlKey: ""
+  # -- Drop ALL default Linux capabilities, then re-add only what the image
+  # entrypoint needs (data-dir chown, gosu privilege drop). Removes the
+  # risky Docker defaults (NET_RAW, SYS_CHROOT, MKNOD, AUDIT_WRITE, ...).
+  # Set false for the full default set (compose parity).
+  dropAllCapabilities: true
+  capabilities:
+    - CHOWN
+    - FOWNER
+    - SETGID
+    - SETUID
   # -- compose `shm_size: 8gb`: mounted as a tmpfs (emptyDir medium: Memory)
   # at /dev/shm. Empty string mounts it without a size limit.
   shmSize: 8Gi
@@ -105,6 +123,15 @@ redis:
     # Bump deliberately.
     tag: 8.4-alpine
     pullPolicy: IfNotPresent
+  # -- Drop ALL default Linux capabilities, then re-add only what the image
+  # entrypoint needs (data-dir chown, gosu privilege drop). Set false for
+  # the full default set (compose parity).
+  dropAllCapabilities: true
+  capabilities:
+    - CHOWN
+    - FOWNER
+    - SETGID
+    - SETUID
   persistence:
     size: 8Gi
     storageClass: ""
@@ -127,6 +154,11 @@ dragonfly:
     # moved to a source-available license. Bump deliberately.
     tag: v2.0.2
     pullPolicy: IfNotPresent
+  # -- Drop ALL default Linux capabilities; the image execs the server
+  # directly (no chown/privilege-drop entrypoint), so nothing is re-added.
+  # Set false for the full default set (compose parity).
+  dropAllCapabilities: true
+  capabilities: []
   # -- Dragonfly server flags. --proactor_threads=1 is deliberate: Dragonfly
   # sizes its thread pool from the NODE's core count, not the container's
   # CPU limit, so on a many-core node it would otherwise spawn dozens of
@@ -158,6 +190,11 @@ meilisearch:
     # Bump deliberately, together with upgradeDb.
     tag: v1.54.0
     pullPolicy: IfNotPresent
+  # -- Drop ALL default Linux capabilities; the image runs as its own
+  # non-root user, so nothing is re-added. Set false for the full default
+  # set (compose parity).
+  dropAllCapabilities: true
+  capabilities: []
   # -- Master key; required when enabled (fail-fast, like the compose
   # entrypoint). Prefer existingSecret for production.
   masterKey: ""
@@ -243,9 +280,18 @@ silo:
   # configured). Set to [] to remove, mirroring "Undo: remove this line" in
   # the compose file. SILO_NET_TCP_CONGESTION=off /
   # SILO_NET_TCP_SEND_BUFFER=off (via extraEnv) turn each part off
-  # individually.
+  # individually. These are ADDED BACK on top of the init baseline when
+  # dropAllCapabilities is true.
   capabilities:
     - NET_ADMIN
+
+  # -- Drop ALL default Linux capabilities first (recommended: removes the
+  # risky image defaults like NET_RAW, SYS_CHROOT, MKNOD, AUDIT_WRITE),
+  # then re-add the baseline the image's root s6 init needs (CHOWN,
+  # FOWNER, DAC_OVERRIDE, SETGID, SETUID) plus `capabilities` above. In
+  # nonRootMode the baseline is skipped (nothing runs as root). Set false
+  # for the full default capability set (compose parity).
+  dropAllCapabilities: true
 
   transcode:
     # -- Intel/AMD hardware transcoding (VA-API / Quick Sync): mounts a

@@ -58,6 +58,21 @@ spec:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          {{- if or .Values.postgres.dropAllCapabilities .Values.postgres.capabilities }}
+          # Drop ALL default Linux capabilities, then re-add only what the
+          # image entrypoint needs (data-dir chown, gosu privilege drop).
+          # dropAllCapabilities: false restores the full default set.
+          securityContext:
+            capabilities:
+              {{- if .Values.postgres.dropAllCapabilities }}
+              drop:
+                - ALL
+              {{- end }}
+              {{- if .Values.postgres.capabilities }}
+              add:
+                {{- toYaml .Values.postgres.capabilities | nindent 16 }}
+              {{- end }}
+          {{- end }}
           args:
             {{- toYaml .Values.postgres.args | nindent 12 }}
           env:

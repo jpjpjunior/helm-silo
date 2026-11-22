@@ -64,7 +64,7 @@ container/pod instead of Silo's omnibus single container.
 | Secret | `<release>-postgres-auth` | generated PostgreSQL password + assembled `DATABASE_URL` (skipped when you bring `postgres.auth.existingSecret`; with `existingSecretUrlKey` the URL comes from your secret via valueFrom) |
 | Gateway (optional) | `<release>-gateway` | only with `gateway.gateway.create=true`; otherwise HTTPRoutes attach to your existing Gateway |
 | HTTPRoute(s) (optional) | `<release>` (+ `<release>-jellyfin`, `<release>-audiobookshelf`) | only with `gateway.enabled=true` |
-| NetworkPolicy(s) (optional) | `<release>-{postgres,redis,dragonfly,meilisearch}` | default-deny ingress per datastore, only with `networkPolicy.enabled=true` |
+| NetworkPolicy(s) (optional) | `<release>-{postgres,redis,dragonfly,meilisearch}` | default-deny ingress+egress per datastore, only with `networkPolicy.enabled=true` |
 | Job (helm test hook) | `<release>-test` | TCP smoke checks; run with `helm test <release>` |
 
 ## docker-compose → chart mapping
@@ -383,14 +383,33 @@ at render time: enabling the gateway without hostnames, without a parent
 
 ### Network isolation (optional)
 
-`networkPolicy.enabled=true` creates a default-deny-ingress NetworkPolicy for
-each in-cluster datastore (postgres, redis/dragonfly, meilisearch) that allows
-traffic only from this release's Silo pods in the same namespace. Requires a
-CNI that enforces NetworkPolicy (Calico/Cilium/kube-router do; flannel does
-not). Extra sources — an admin pod, a monitoring scraper — go through
-`networkPolicy.extraIngress` (raw NetworkPolicy `ingress` items, appended to
-every datastore policy), or disable the policies if you run cross-namespace
-database tooling.
+`networkPolicy.enabled=true` creates one NetworkPolicy per in-cluster
+datastore (postgres, redis/dragonfly, meilisearch) with **default-deny
+ingress and egress**: ingress only from this release's Silo pods in the same
+namespace (plus the `helm test` job, so `helm test` still passes), and no
+egress at all — a datastore never initiates connections. Requires a CNI that
+enforces NetworkPolicy (Calico/Cilium/kube-router do; flannel does not).
+Widen the posture with `networkPolicy.extraIngress` / `networkPolicy.extraEgress`
+(raw NetworkPolicy `ingress`/`egress` items, appended to every datastore
+policy) — e.g. an admin pod, a monitoring scraper, or DNS — or disable the
+policies if you run cross-namespace database tooling.
+
+### Capability hardening (Drop ALL)
+
+By default every workload in this chart **drops all Linux capabilities**
+(`capDrop: [ALL]`) and re-adds only the minimal set the image actually
+needs — removing the risky Docker defaults (`NET_RAW`, `SYS_CHROOT`,
+`MKNOD`, `AUDIT_WRITE`, `SETFCAP`, ...) that compose grants silently:
+
+| workload | re-added | why |
+| --- | --- | --- |
+| silo | `CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID` + your `silo.capabilities` (`NET_ADMIN`) | root s6 init chowns data dirs and drops to `PUID:PGID`; BBR / send-buffer helper |
+| postgres, redis | `CHOWN, FOWNER, SETGID, SETUID` | entrypoint chowns the data dir, gosu privilege drop |
+| dragonfly, meilisearch | — | direct exec / non-root image, nothing needed |
+
+If an image update ever needs a capability, add it to that component's
+`capabilities` list; set `dropAllCapabilities: false` on any component to
+restore the full default set (compose parity).
 
 ## Migrating from docker compose
 
@@ -447,8 +466,9 @@ migration is:
 | `gateway.jellyfin.*` / `gateway.audiobookshelf.*` | disabled | optional HTTPRoutes for the compat ports |
 | `redis.image.tag` | `8.4-alpine` | pinned minor; bump deliberately |
 | `postgres.auth.existingSecretUrlKey` | `""` | take `DATABASE_URL` from your secret via valueFrom |
-| `networkPolicy.enabled` | `false` | default-deny ingress on the datastores |
-| `networkPolicy.extraIngress` | `[]` | extra ingress rules appended to each policy |
+| `networkPolicy.enabled` | `false` | default-deny ingress+egress on the datastores |
+| `networkPolicy.extraIngress` / `.extraEgress` | `[]` | widen the datastore policies |
+| `<component>.dropAllCapabilities` | `true` | capDrop `[ALL]` on every workload, minimal re-add (see "Capability hardening"); `false` = compose parity |
 | `tests.enabled` | `true` | `helm test` smoke-check hook |
 
 ## Install from this repository

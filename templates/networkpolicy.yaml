@@ -1,8 +1,10 @@
-{{/* Opt-in network isolation: default-deny-ingress NetworkPolicies for the
-     in-cluster datastores, allowing only this release's Silo pods (same
-     namespace). Requires a CNI that enforces NetworkPolicy (flannel does
-     not). networkPolicy.extraIngress (raw `ingress` items) is appended to
-     every policy to allow more sources. */}}
+{{/* Opt-in network isolation for the in-cluster datastores (postgres,
+     redis/dragonfly, meilisearch): default-deny INGRESS (only this
+     release's Silo pods and, when tests.enabled, the helm-test job may
+     connect) and default-deny EGRESS (a datastore never initiates
+     connections). Requires a CNI that enforces NetworkPolicy (flannel
+     does not). networkPolicy.extraIngress / extraEgress (raw NetworkPolicy
+     items) are appended to every policy to widen the posture. */}}
 {{- if .Values.networkPolicy.enabled }}
 {{- if .Values.postgres.enabled }}
 ---
@@ -19,17 +21,24 @@ spec:
       {{- include "silo.componentLabels" (dict "root" . "component" "postgres") | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
         - podSelector:
             matchLabels:
               {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+        {{- if .Values.tests.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "test") | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 5432
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  egress: {{ .Values.networkPolicy.extraEgress | default list | toJson }}
 {{- end }}
 {{- if .Values.redis.enabled }}
 ---
@@ -46,17 +55,24 @@ spec:
       {{- include "silo.componentLabels" (dict "root" . "component" "redis") | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
         - podSelector:
             matchLabels:
               {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+        {{- if .Values.tests.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "test") | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 6379
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  egress: {{ .Values.networkPolicy.extraEgress | default list | toJson }}
 {{- end }}
 {{- if .Values.dragonfly.enabled }}
 ---
@@ -73,17 +89,24 @@ spec:
       {{- include "silo.componentLabels" (dict "root" . "component" "dragonfly") | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
         - podSelector:
             matchLabels:
               {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+        {{- if .Values.tests.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "test") | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 6379
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  egress: {{ .Values.networkPolicy.extraEgress | default list | toJson }}
 {{- end }}
 {{- if .Values.meilisearch.enabled }}
 ---
@@ -100,16 +123,23 @@ spec:
       {{- include "silo.componentLabels" (dict "root" . "component" "meilisearch") | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
         - podSelector:
             matchLabels:
               {{- include "silo.componentLabels" (dict "root" . "component" "silo") | nindent 14 }}
+        {{- if .Values.tests.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "silo.componentLabels" (dict "root" . "component" "test") | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 7700
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  egress: {{ .Values.networkPolicy.extraEgress | default list | toJson }}
 {{- end }}
 {{- end }}
