@@ -5,7 +5,33 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.202564168Z"
+    created: "2026-11-22T03:03:10.089445248Z"
+    description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
+      plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
+      — converted from the upstream docker-compose.advanced.yml multi-container layout
+      into a single self-contained chart. '
+    digest: f0a71f8b5f42801211fe192b83d525cc54808a7e1d777f3b5d321112f189a123
+    home: https://siloserver.org
+    keywords:
+    - media
+    - streaming
+    - jellyfin
+    - audiobookshelf
+    - postgresql
+    - redis
+    - dragonflydb
+    - meilisearch
+    kubeVersion: '>=1.25.0-0'
+    name: silo
+    type: application
+    urls:
+    - https://jpjpjunior.github.io/helm-silo/silo-0.4.2.tgz
+    version: 0.4.2
+  - annotations:
+      category: Media
+    apiVersion: v2
+    appVersion: latest
+    created: "2026-11-22T03:03:10.088091074Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
       — converted from the upstream docker-compose.advanced.yml multi-container layout
@@ -31,7 +57,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.196456619Z"
+    created: "2026-11-22T03:03:10.085867822Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
       — converted from the upstream docker-compose.advanced.yml multi-container layout
@@ -57,7 +83,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.191575059Z"
+    created: "2026-11-22T03:03:10.084464745Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
       — converted from the upstream docker-compose.advanced.yml multi-container layout
@@ -83,7 +109,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.190579816Z"
+    created: "2026-11-22T03:03:10.083425492Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis (or DragonflyDB) and optional Meilisearch
       — converted from the upstream docker-compose.advanced.yml multi-container layout
@@ -109,7 +135,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.189568691Z"
+    created: "2026-11-22T03:03:10.082386431Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
       from the upstream docker-compose.advanced.yml multi-container layout into a
@@ -134,7 +160,7 @@ entries:
       category: Media
     apiVersion: v2
     appVersion: latest
-    created: "2026-11-22T02:42:36.188629644Z"
+    created: "2026-11-22T03:03:10.081406305Z"
     description: 'Silo media server with Jellyfin- and Audiobookshelf-compatible endpoints,
       plus in-cluster PostgreSQL (pgvector), Redis and optional Meilisearch — converted
       from the upstream docker-compose.advanced.yml multi-container layout into a
@@ -155,4 +181,4 @@ entries:
     urls:
     - https://jpjpjunior.github.io/helm-silo/silo-0.2.0.tgz
     version: 0.2.0
-generated: "2026-11-22T02:42:36.187491596Z"
+generated: "2026-11-22T03:03:10.080264328Z"
