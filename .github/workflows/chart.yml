@@ -22,7 +22,7 @@ jobs:
       - name: chart validator (render scenarios + assertions)
         run: |
           pip install pyyaml
-          CHART_DIR=. TEST_VALUES_DIR=ci/test-values python ci/validate_chart.py
+          python ci/validate_chart.py
       - name: kubeconform (strict, missing CRD schemas ignored)
         run: |
           curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz

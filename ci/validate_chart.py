@@ -5,9 +5,9 @@ import subprocess
 import sys
 import yaml
 
-HELM = os.environ.get("HELM_BIN", "/home/z/my-project/scripts/.tooling/linux-amd64/helm")
-CHART = os.environ.get("CHART_DIR", "/home/z/my-project/download/silo")
-TV = os.environ.get("TEST_VALUES_DIR", "/home/z/my-project/scripts/test-values")
+HELM = os.environ.get("HELM_BIN", "helm")
+CHART = os.environ.get("CHART_DIR", ".")
+TV = os.environ.get("TEST_VALUES_DIR", "ci/test-values")
 
 failures = []
 
