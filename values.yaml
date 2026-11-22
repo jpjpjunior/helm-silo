@@ -314,6 +314,18 @@ silo:
     artwork:
       size: 10Gi
       mountPath: /var/lib/silo/artwork
+    # Dedicated volume for Silo's own backups. Deliberately not squeezed
+    # onto a 1Gi data claim: the pre-migration backup guard refuses to run
+    # migrations unless 1.5x the previous backup + 1GB is free at the
+    # destination, which a 1Gi claim cannot honor once a few backups exist.
+    # Point Silo at this mount in Settings > Backups (backup destination).
+    # Grow via `size` BEFORE the volume fills — PVCs never shrink, and a
+    # chart size below the live claim fails `helm upgrade` with a
+    # forbidden-shrink error. Bring your own claim with existingClaim;
+    # retention/pruning stays the app's job (Settings > Backups).
+    backups:
+      size: 20Gi
+      mountPath: /var/lib/silo/backups
     compat:
       size: 1Gi
       mountPath: /var/lib/silo/compat

@@ -73,7 +73,9 @@ def a_default(ds):
     check(len(k.get("StatefulSet", [])) == 2, "A: 2 StatefulSets (postgres, redis)")
     check(len(k.get("Deployment", [])) == 1, "A: 1 Deployment (silo)")
     check(len(k.get("Service", [])) == 3, "A: 3 Services (2 headless + 1 main)")
-    check(len(k.get("PersistentVolumeClaim", [])) == 7, "A: 7 PVCs (silo mounts)")
+    check(len(k.get("PersistentVolumeClaim", [])) == 8, "A: 8 PVCs (silo mounts, incl backups)")
+    b = [p for p in k["PersistentVolumeClaim"] if p["metadata"]["name"] == "silo-backups"][0]
+    check(b["spec"]["resources"]["requests"]["storage"] == "20Gi", "A: backups PVC 20Gi")
     check(len(k.get("Secret", [])) == 1, "A: 1 chart Secret (postgres-auth)")
     dep = by_kind(ds, "Deployment")[0]
     stss = by_kind(ds, "StatefulSet")
@@ -124,7 +126,9 @@ def a_default(ds):
     check(mounts.get("/tmp/silo-transcode") == "transcode", "A: transcode mount")
     vs = {v["name"]: v["persistentVolumeClaim"]["claimName"] for v in volumes(dep) if "persistentVolumeClaim" in v}
     check(vs.get("media") == "silo-media", f"A: media claim silo-media ({vs.get('media')})")
-    check(len(vs) == 7, f"A: 7 PVC-backed volumes ({len(vs)})")
+    check(vs.get("backups") == "silo-backups", "A: backups claim silo-backups")
+    check(mounts.get("/var/lib/silo/backups") == "backups", "A: backups mounted at /var/lib/silo/backups")
+    check(len(vs) == 8, f"A: 8 PVC-backed volumes ({len(vs)})")
     vct_stability(ds, "A")
     o_data_safety(ds)
     r_test_hook(ds)
@@ -163,7 +167,7 @@ def b_meili(ds):
 def c_external(ds):
     kinds = [d["kind"] for d in ds]
     check("StatefulSet" not in kinds, "C: no StatefulSets (postgres/redis off)")
-    check(len(by_kind(ds, "PersistentVolumeClaim")) == 6, "C: 6 PVCs (media uses existingClaim)")
+    check(len(by_kind(ds, "PersistentVolumeClaim")) == 7, "C: 7 PVCs (media external, backups still chart-managed)")
     dep = by_kind(ds, "Deployment")[0]
     e = get_env(dep, "DATABASE_URL")
     check(e and e.get("value") == "postgres://silo:dbpass@my-cluster:5432/silo?sslmode=disable", "C: databaseUrlOverride used")
@@ -258,7 +262,7 @@ def o_data_safety(ds):
     """All chart-managed silo PVCs must survive `helm uninstall`."""
     keep = [d for d in by_kind(ds, "PersistentVolumeClaim")
             if d["metadata"].get("annotations", {}).get("helm.sh/resource-policy") == "keep"]
-    check(len(keep) == 7, f"A: resource-policy keep on all 7 chart PVCs ({len(keep)})")
+    check(len(keep) == 8, f"A: resource-policy keep on all 8 chart PVCs ({len(keep)})")
 
 
 def r_test_hook(ds):

@@ -117,6 +117,45 @@ s6 init drops privileges to `PUID:PGID` (default 1000:1000), which needs read
 access to the media; the chart sets `fsGroup` to PGID so fresh PVC mounts are
 group-accessible.
 
+### Backups volume
+
+Since 0.4.1 the chart ships a dedicated volume for Silo's own backups
+(`silo.persistence.backups`, mounted at `/var/lib/silo/backups`). Silo's
+pre-migration guard refuses to run database migrations unless `1.5x the
+previous backup + 1GB` is free at the backup destination — a budget a small
+data claim cannot honor once a few backups exist, and then upgrades stall
+until you free space. Give the destination its own room:
+
+1. In Silo, set the backup destination to `/var/lib/silo/backups`
+   (Settings → Backups). The chart only provides the volume; the app stores
+   the destination path in its own settings.
+2. Grow it before it fills — PVCs never shrink:
+
+   ```yaml
+   silo:
+     persistence:
+       backups:
+         size: 50Gi
+   ```
+
+   If you ever resized the claim manually with `kubectl patch`, mirror the
+   live size in your values (`--set silo.persistence.backups.size=...`)
+   before upgrading: a chart size below the live claim fails the upgrade
+   with a forbidden-shrink error.
+3. Or bring your own claim:
+
+   ```yaml
+   silo:
+     persistence:
+       backups:
+         existingClaim: backup-nfs
+   ```
+
+Retention and pruning of old backups stay the app's job (Settings → Backups);
+size the volume for a few backups plus the guard's margin. Like every data
+claim, the backups PVC carries `helm.sh/resource-policy: keep` and survives
+`helm uninstall`.
+
 ### Runtime user (root init, non-root escape hatch)
 
 The Silo image uses an s6-overlay init that **must start as root** and then
@@ -398,6 +437,7 @@ migration is:
 | `silo.transcode.*` | disabled | VA-API hostPath / NVIDIA runtimeClass |
 | `silo.hostProc.enabled` | `false` | `/proc` host mounts (LXC nodes only) |
 | `silo.persistence.*.size` | see values.yaml | one PVC per data dir |
+| `silo.persistence.backups` | `20Gi` → `/var/lib/silo/backups` | dedicated volume for Silo's own backups (see "Backups volume") |
 | `silo.extraEnv` | `[]` | replaces compose `env_file` |
 | `service.type` | `ClusterIP` | ports 8090 / 8096 / 13378 |
 | `gateway.enabled` | `false` | Gateway API HTTPRoute for the web UI |
