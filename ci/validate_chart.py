@@ -90,9 +90,9 @@ def a_default(ds):
     check(imgs.get("postgres") == "pgvector/pgvector:pg18", f"A: postgres image ({imgs.get('postgres')})")
     check(imgs.get("redis") == "redis:8.4-alpine", f"A: redis image pinned ({imgs.get('redis')})")
     for x in pg:
-        cc = x.get("securityContext", {}).get("capabilities", {})
-        check(cc.get("drop") == ["ALL"], f"A: {x['name']} drops ALL caps")
-        check(cc.get("add") == ["CHOWN", "FOWNER", "SETGID", "SETUID"], f"A: {x['name']} minimal caps ({cc.get('add')})")
+        sec = x.get("securityContext", {})
+        check(sec.get("allowPrivilegeEscalation") is False, f"A: {x['name']} allowPrivilegeEscalation false")
+        check("capabilities" not in sec, f"A: {x['name']} default cap set (no capDrop, no capAdd)")
     # wait-for-datastores init container: rendered only when an in-cluster
     # datastore is enabled, and hardened (restricted-PSS shape)
     ics = dep["spec"]["template"]["spec"].get("initContainers", [])
@@ -110,9 +110,8 @@ def a_default(ds):
     check(dep["spec"]["strategy"]["type"] == "Recreate", "A: Recreate strategy")
     check(dep["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 120, "A: terminationGracePeriodSeconds 120")
     capsc = c.get("securityContext", {}).get("capabilities", {})
-    check(capsc.get("drop") == ["ALL"], f"A: silo drops ALL caps ({capsc.get('drop')})")
-    check(capsc.get("add") == ["CHOWN", "FOWNER", "DAC_OVERRIDE", "SETGID", "SETUID", "NET_ADMIN"],
-          f"A: silo init baseline + NET_ADMIN ({capsc.get('add')})")
+    check("drop" not in capsc, f"A: silo keeps the default cap set (no capDrop) ({capsc.get('drop')})")
+    check(capsc.get("add") == ["NET_ADMIN"], f"A: silo capAdd NET_ADMIN only, compose parity ({capsc.get('add')})")
     # env
     e = get_env(dep, "DATABASE_URL")
     check(e and "valueFrom" in e and "value" not in e, "A: DATABASE_URL via secretKeyRef (no plaintext in manifest)")
@@ -170,8 +169,9 @@ def b_meili(ds):
     msts = [s for s in by_kind(ds, "StatefulSet") if s["metadata"]["name"] == "silo-meilisearch"][0]
     mc = msts["spec"]["template"]["spec"]["containers"][0]
     check(mc["image"] == "getmeili/meilisearch:v1.54.0", "B: meili pinned image")
-    mcc = mc.get("securityContext", {}).get("capabilities", {})
-    check(mcc.get("drop") == ["ALL"] and not mcc.get("add"), f"B: meili drop ALL, nothing re-added ({mcc})")
+    msec = mc.get("securityContext", {})
+    check(msec.get("allowPrivilegeEscalation") is False and "capabilities" not in msec,
+          f"B: meili default cap set, APE false ({msec})")
     envs = {e["name"]: e for e in mc["env"]}
     check("MEILI_MASTER_KEY" in envs and "valueFrom" in envs["MEILI_MASTER_KEY"], "B: MEILI_MASTER_KEY via secretKeyRef")
     check(envs["MEILI_UPGRADE_DB"]["value"] == "false", "B: MEILI_UPGRADE_DB false")
@@ -262,8 +262,9 @@ def j_dragonfly(ds):
     df = [s for s in stss if s["metadata"]["name"] == "silo-dragonfly"][0]
     c = df["spec"]["template"]["spec"]["containers"][0]
     check(c["image"] == "docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2", f"J: pinned dragonfly image ({c['image']})")
-    dcc = c.get("securityContext", {}).get("capabilities", {})
-    check(dcc.get("drop") == ["ALL"] and not dcc.get("add"), f"J: dragonfly drop ALL, nothing re-added ({dcc})")
+    dsec = c.get("securityContext", {})
+    check(dsec.get("allowPrivilegeEscalation") is False and "capabilities" not in dsec,
+          f"J: dragonfly default cap set, APE false ({dsec})")
     args = c.get("args", [])
     check("--proactor_threads=1" in args and "--alsologtostderr" in args, f"J: default flags ({args})")
     check(c["readinessProbe"]["tcpSocket"]["port"] == "redis", "J: tcpSocket readiness on 6379")

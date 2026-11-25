@@ -75,11 +75,10 @@ spec:
         - name: dragonfly
           image: "{{ .Values.dragonfly.image.repository }}:{{ .Values.dragonfly.image.tag }}"
           imagePullPolicy: {{ .Values.dragonfly.image.pullPolicy }}
-          # Drop ALL default Linux capabilities; the image execs the server
-          # directly (no chown/privilege-drop entrypoint), so by default
-          # nothing is re-added. Add one via dragonfly.capabilities if an
-          # image update ever needs it; dropAllCapabilities: false restores
-          # the full default set.
+          # Opt-in hardening (dropAllCapabilities: true): drop ALL default
+          # Linux capabilities. The image's entrypoint chowns the data dir
+          # to dfly before exec, so the list needs CHOWN (plus FOWNER and
+          # DAC_OVERRIDE on volumes created by older releases).
           securityContext:
             allowPrivilegeEscalation: false
             {{- if or .Values.dragonfly.dropAllCapabilities .Values.dragonfly.capabilities }}

@@ -1,6 +1,8 @@
 # Scenario D: GPU + VA-API + hostProc + no NET_ADMIN + LoadBalancer
+# (opts into silo.dropAllCapabilities to exercise the capDrop [ALL] path)
 silo:
   existingSecret: silo-secrets
+  dropAllCapabilities: true
   capabilities: []
   transcode:
     nvidia:

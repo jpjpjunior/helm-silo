@@ -83,16 +83,16 @@ postgres:
     # legacy render-time assembly (URL, password included, visible in the
     # pod spec).
     existingSecretUrlKey: ""
-  # -- Drop ALL default Linux capabilities, then re-add only what the image
-  # entrypoint needs (data-dir chown, gosu privilege drop). Removes the
-  # risky Docker defaults (NET_RAW, SYS_CHROOT, MKNOD, AUDIT_WRITE, ...).
-  # Set false for the full default set (compose parity).
-  dropAllCapabilities: true
-  capabilities:
-    - CHOWN
-    - FOWNER
-    - SETGID
-    - SETUID
+  # -- Opt-in hardening: drop ALL default Linux capabilities and re-add only
+  # what the image entrypoint needs (data-dir chown, gosu privilege drop),
+  # removing the risky Docker defaults (NET_RAW, SYS_CHROOT, MKNOD,
+  # AUDIT_WRITE, ...). Default false = full default capability set (compose
+  # parity). Recommended list when enabling: [CHOWN, FOWNER, DAC_OVERRIDE,
+  # SETGID, SETUID] — DAC_OVERRIDE is required on data volumes created by
+  # older releases (the entrypoint must traverse 0700 dirs owned by the
+  # postgres uid).
+  dropAllCapabilities: false
+  capabilities: []
   # -- compose `shm_size: 8gb`: mounted as a tmpfs (emptyDir medium: Memory)
   # at /dev/shm. Empty string mounts it without a size limit.
   shmSize: 8Gi
@@ -132,15 +132,13 @@ redis:
     # Bump deliberately.
     tag: 8.4-alpine
     pullPolicy: IfNotPresent
-  # -- Drop ALL default Linux capabilities, then re-add only what the image
-  # entrypoint needs (data-dir chown, gosu privilege drop). Set false for
-  # the full default set (compose parity).
-  dropAllCapabilities: true
-  capabilities:
-    - CHOWN
-    - FOWNER
-    - SETGID
-    - SETUID
+  # -- Opt-in hardening: drop ALL default Linux capabilities and re-add only
+  # what the image entrypoint needs (data-dir chown, gosu privilege drop).
+  # Default false = full default capability set (compose parity). Recommended
+  # list when enabling: [CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID]
+  # (DAC_OVERRIDE for data volumes created by older releases).
+  dropAllCapabilities: false
+  capabilities: []
   # -- Optional extra arguments passed to redis-server (e.g.
   # ["--maxmemory", "1gb", "--maxmemory-policy", "noeviction"]).
   args: []
@@ -172,10 +170,11 @@ dragonfly:
     # moved to a source-available license. Bump deliberately.
     tag: v2.0.2
     pullPolicy: IfNotPresent
-  # -- Drop ALL default Linux capabilities; the image execs the server
-  # directly (no chown/privilege-drop entrypoint), so nothing is re-added.
-  # Set false for the full default set (compose parity).
-  dropAllCapabilities: true
+  # -- Opt-in hardening: drop ALL default Linux capabilities. The image's
+  # entrypoint chowns the data dir to dfly before exec, so the list needs
+  # CHOWN (plus FOWNER and DAC_OVERRIDE on data volumes created by older
+  # releases). Default false = full default capability set (compose parity).
+  dropAllCapabilities: false
   capabilities: []
   # -- Dragonfly server flags. --proactor_threads=1 is deliberate: Dragonfly
   # sizes its thread pool from the NODE's core count, not the container's
@@ -215,10 +214,10 @@ meilisearch:
     # Bump deliberately, together with upgradeDb.
     tag: v1.54.0
     pullPolicy: IfNotPresent
-  # -- Drop ALL default Linux capabilities; the image runs as its own
-  # non-root user, so nothing is re-added. Set false for the full default
-  # set (compose parity).
-  dropAllCapabilities: true
+  # -- Opt-in hardening: drop ALL default Linux capabilities; the image runs
+  # as its own non-root user, so nothing needs re-adding. Default false =
+  # full default capability set (compose parity).
+  dropAllCapabilities: false
   capabilities: []
   # -- Master key; required when enabled (fail-fast, like the compose
   # entrypoint). Prefer existingSecret for production.
@@ -323,18 +322,19 @@ silo:
   # configured). Set to [] to remove, mirroring "Undo: remove this line" in
   # the compose file. SILO_NET_TCP_CONGESTION=off /
   # SILO_NET_TCP_SEND_BUFFER=off (via extraEnv) turn each part off
-  # individually. These are ADDED BACK on top of the init baseline when
-  # dropAllCapabilities is true.
+  # individually. Added on top of the default capability set
+  # (dropAllCapabilities: false) or the init baseline (true).
   capabilities:
     - NET_ADMIN
 
-  # -- Drop ALL default Linux capabilities first (recommended: removes the
+  # -- Opt-in hardening: drop ALL default Linux capabilities (removes the
   # risky image defaults like NET_RAW, SYS_CHROOT, MKNOD, AUDIT_WRITE),
   # then re-add the baseline the image's root s6 init needs (CHOWN,
   # FOWNER, DAC_OVERRIDE, SETGID, SETUID) plus `capabilities` above. In
-  # nonRootMode the baseline is skipped (nothing runs as root). Set false
-  # for the full default capability set (compose parity).
-  dropAllCapabilities: true
+  # nonRootMode all capabilities are dropped and nothing is re-added
+  # (restricted pod-security profile). Default false = full default
+  # capability set plus `capabilities` above (compose parity).
+  dropAllCapabilities: false
 
   transcode:
     # -- Intel/AMD hardware transcoding (VA-API / Quick Sync): mounts a

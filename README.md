@@ -394,18 +394,20 @@ Widen the posture with `networkPolicy.extraIngress` / `networkPolicy.extraEgress
 policy) — e.g. an admin pod, a monitoring scraper, or DNS — or disable the
 policies if you run cross-namespace database tooling.
 
-### Capability hardening (Drop ALL)
+### Capability hardening (opt-in Drop ALL)
 
-By default every workload in this chart **drops all Linux capabilities**
-(`capDrop: [ALL]`) and re-adds only the minimal set the image actually
-needs — removing the risky Docker defaults (`NET_RAW`, `SYS_CHROOT`,
-`MKNOD`, `AUDIT_WRITE`, `SETFCAP`, ...) that compose grants silently:
+By default every workload keeps the **full default Linux capability set**
+(compose parity, including the risky Docker defaults `NET_RAW`, `SYS_CHROOT`,
+`MKNOD`, `AUDIT_WRITE`, `SETFCAP`, ...). Hardening is opt-in per component:
+set `dropAllCapabilities: true` to drop everything (`capDrop: [ALL]`) and
+re-add only a minimal list:
 
-| workload | re-added | why |
+| workload | recommended `capabilities` list | why |
 | --- | --- | --- |
 | silo | `CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID` + your `silo.capabilities` (`NET_ADMIN`) | root s6 init chowns data dirs and drops to `PUID:PGID`; BBR / send-buffer helper |
-| postgres, redis | `CHOWN, FOWNER, SETGID, SETUID` | entrypoint chowns the data dir, gosu privilege drop |
-| dragonfly, meilisearch | — | direct exec / non-root image, nothing needed |
+| postgres, redis | `CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID` | entrypoint chowns the data dir, gosu privilege drop; `DAC_OVERRIDE` is needed on data volumes created by older releases (0700 dirs owned by the server uid) |
+| dragonfly | `CHOWN, FOWNER, DAC_OVERRIDE` | the entrypoint chowns the data dir to dfly before exec |
+| meilisearch | — | non-root image, nothing needed |
 
 If an image update ever needs a capability, add it to that component's
 `capabilities` list; set `dropAllCapabilities: false` on any component to
@@ -413,6 +415,13 @@ restore the full default set (compose parity).
 
 ### Upgrade notes (0.5.0)
 
+- **Defaults restore the full default capability set (compose parity):**
+  `dropAllCapabilities` now defaults to `false` on every workload — the
+  `capDrop: [ALL]` hardening shipped by default in 0.4.1/0.4.2 caused
+  startup failures on existing data volumes (missing `DAC_OVERRIDE` /
+  `CHOWN`). If you opt back in with `dropAllCapabilities: true`, use the
+  recommended lists from "Capability hardening" (postgres/redis need
+  `DAC_OVERRIDE`, dragonfly needs `CHOWN`).
 - **Resource-name length guard:** `fullname` is truncated to 44 characters so
   suffixed names (`-download-artifacts`, ...) stay inside Kubernetes' 63-char
   DNS label limit. Only matters if your release name is long: if truncation
@@ -488,7 +497,7 @@ migration is:
 | `postgres.auth.existingSecretUrlKey` | `""` | take `DATABASE_URL` from your secret via valueFrom |
 | `networkPolicy.enabled` | `false` | default-deny ingress+egress on the datastores |
 | `networkPolicy.extraIngress` / `.extraEgress` | `[]` | widen the datastore policies |
-| `<component>.dropAllCapabilities` | `true` | capDrop `[ALL]` on every workload, minimal re-add (see "Capability hardening"); `false` = compose parity |
+| `<component>.dropAllCapabilities` | `false` | opt-in capDrop `[ALL]` with minimal re-add (see "Capability hardening"); `false` (default) = compose parity |
 | `tests.enabled` | `true` | `helm test` smoke-check hook |
 
 ## Install from this repository
