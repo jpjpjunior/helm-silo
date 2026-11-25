@@ -27,12 +27,20 @@ Gateway API HTTPRoutes are attached to
 {{- end }}
 
 Backends:
-  PostgreSQL{{- if .Values.postgres.enabled }}: {{ $fullname }}-postgres (in-cluster). Generated credentials:
+  PostgreSQL{{- if .Values.postgres.enabled }}: {{ $fullname }}-postgres (in-cluster).
+  {{- if .Values.postgres.auth.existingSecret }} Credentials from existing Secret "{{ .Values.postgres.auth.existingSecret }}".
+  {{- else }} Credentials:
       kubectl get secret {{ $fullname }}-postgres-auth -n {{ .Release.Namespace }} \
         -o jsonpath='{.data.postgres-password}' | base64 -d
+  {{- end }}
+  {{- else if .Values.silo.databaseUrlExistingSecret }}: external (Secret "{{ .Values.silo.databaseUrlExistingSecret }}")
   {{- else }}: external (silo.databaseUrlOverride)
   {{- end }}
-  Cache: {{ ternary "DragonflyDB" "Redis" .Values.dragonfly.enabled }}{{- if or .Values.redis.enabled .Values.dragonfly.enabled }} at {{ $cacheHost }}:6379 (in-cluster){{- else }} at the URL in silo.redisUrlOverride{{- end }}
+  Cache: {{- if .Values.silo.redisUrlExistingSecret }} external (Secret "{{ .Values.silo.redisUrlExistingSecret }}")
+  {{- else if .Values.silo.redisUrlOverride }} external (silo.redisUrlOverride)
+  {{- else if .Values.dragonfly.enabled }} DragonflyDB at {{ $cacheHost }}:6379 (in-cluster)
+  {{- else }} Redis at {{ $cacheHost }}:6379 (in-cluster)
+  {{- end }}
 {{- if not .Values.silo.existingSecret }}
 
 The SECRET_KEY is stored in the chart-managed Secret "{{ $fullname }}-silo-auth".

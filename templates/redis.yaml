@@ -35,6 +35,13 @@ spec:
     metadata:
       labels:
         {{- include "silo.componentLabels" (dict "root" . "component" "redis") | nindent 8 }}
+        {{- with .Values.redis.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.redis.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -42,6 +49,13 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "silo.serviceAccountName" . }}
       automountServiceAccountToken: false
+      {{- with .Values.redis.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.redis.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.redis.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -58,11 +72,12 @@ spec:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
           imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
-          {{- if or .Values.redis.dropAllCapabilities .Values.redis.capabilities }}
           # Drop ALL default Linux capabilities, then re-add only what the
           # image entrypoint needs (data-dir chown, gosu privilege drop).
           # dropAllCapabilities: false restores the full default set.
           securityContext:
+            allowPrivilegeEscalation: false
+            {{- if or .Values.redis.dropAllCapabilities .Values.redis.capabilities }}
             capabilities:
               {{- if .Values.redis.dropAllCapabilities }}
               drop:
@@ -72,6 +87,10 @@ spec:
               add:
                 {{- toYaml .Values.redis.capabilities | nindent 16 }}
               {{- end }}
+            {{- end }}
+          {{- with .Values.redis.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
             {{- with .Values.redis.extraEnv }}

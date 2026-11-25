@@ -11,8 +11,8 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
-  {{- with .Values.service.externalTrafficPolicy }}
-  externalTrafficPolicy: {{ . }}
+  {{- if and .Values.service.externalTrafficPolicy (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
   {{- end }}
   ports:
     {{- range $name := keys .Values.service.ports | sortAlpha }}
@@ -20,6 +20,9 @@ spec:
     - name: {{ $name }}
       port: {{ $p.port }}
       targetPort: {{ $p.targetPort }}
+      {{- if and $p.nodePort (or (eq $.Values.service.type "NodePort") (eq $.Values.service.type "LoadBalancer")) }}
+      nodePort: {{ $p.nodePort }}
+      {{- end }}
       protocol: TCP
     {{- end }}
   selector:

@@ -18,13 +18,30 @@ spec:
   template:
     metadata:
       name: {{ include "silo.fullname" . }}-test
+      labels:
+        {{- include "silo.componentLabels" (dict "root" . "component" "test") | nindent 8 }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       restartPolicy: Never
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: smoke
           image: {{ .Values.tests.image }}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command: [sh, -c]
           args:
             - |

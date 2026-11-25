@@ -68,6 +68,9 @@ postgres:
     database: silo
     # -- Empty => the chart generates a random password on first install and
     # keeps it stable across upgrades (stored in <fullname>-postgres-auth).
+    # GitOps note (ArgoCD / Flux): Helm's `lookup` returns empty during
+    # offline rendering (`helm template`), so leaving this empty causes drift
+    # on every sync. Use `existingSecret` (+ `existingSecretUrlKey`) instead.
     password: ""
     # -- Use your own Secret instead; it must contain the key below. When
     # set, `password` is ignored and DATABASE_URL is assembled from it at
@@ -100,6 +103,12 @@ postgres:
     - listen_addresses=*
     - -c
     - shared_preload_libraries=pg_stat_statements
+  terminationGracePeriodSeconds: 60
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  podAnnotations: {}
+  podLabels: {}
   persistence:
     size: 20Gi
     storageClass: ""
@@ -132,6 +141,15 @@ redis:
     - FOWNER
     - SETGID
     - SETUID
+  # -- Optional extra arguments passed to redis-server (e.g.
+  # ["--maxmemory", "1gb", "--maxmemory-policy", "noeviction"]).
+  args: []
+  terminationGracePeriodSeconds: 30
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  podAnnotations: {}
+  podLabels: {}
   persistence:
     size: 8Gi
     storageClass: ""
@@ -168,6 +186,13 @@ dragonfly:
   args:
     - --alsologtostderr
     - --proactor_threads=1
+  terminationGracePeriodSeconds: 60
+  podSecurityContext:
+    fsGroup: 999
+    seccompProfile:
+      type: RuntimeDefault
+  podAnnotations: {}
+  podLabels: {}
   persistence:
     size: 8Gi
     storageClass: ""
@@ -202,6 +227,13 @@ meilisearch:
   existingSecretKey: MEILI_MASTER_KEY
   # -- compose MEILI_UPGRADE_DB.
   upgradeDb: false
+  terminationGracePeriodSeconds: 30
+  podSecurityContext:
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  podAnnotations: {}
+  podLabels: {}
   persistence:
     size: 10Gi
     storageClass: ""
@@ -217,12 +249,13 @@ meilisearch:
 # Silo
 # ---------------------------------------------------------------------------
 silo:
-  # -- Must stay 1: Silo is a single-instance server backed by ReadWriteOnce
-  # volumes (the chart fails rendering above 1).
+  # -- Must be 0 (maintenance/migration) or 1: Silo is a single-instance
+  # server backed by ReadWriteOnce volumes (rendering fails above 1).
   replicaCount: 1
   image:
     repository: ghcr.io/silo-server/silo-server
-    tag: latest
+    # -- Defaults to Chart.yaml appVersion when empty.
+    tag: ""
     # :latest + IfNotPresent leaves stale images behind on upgrades, so the
     # default is Always. Pin a version tag for reproducible deploys.
     pullPolicy: Always
@@ -234,6 +267,9 @@ silo:
   # media. With silo.nonRootMode=true the values become runAsUser/runAsGroup.
   puid: 1000
   pgid: 1000
+  # -- Extra GIDs added to the Silo pod (useful for VA-API `/dev/dri` devices
+  # owned by the host `render` or `video` group, e.g. [44, 109]).
+  supplementalGroups: []
 
   # -- Skip the image's s6 init (which needs root) and run the `silo` binary
   # directly as PUID:PGID (runAsNonRoot: true) — for clusters enforcing the
@@ -261,8 +297,15 @@ silo:
   # -- Full postgres:// URL override. Required when postgres.enabled=false
   # (e.g. an external CloudNativePG cluster).
   databaseUrlOverride: ""
+  # -- Secret-backed alternative to databaseUrlOverride (keeps credentials
+  # out of values.yaml and the Deployment spec).
+  databaseUrlExistingSecret: ""
+  databaseUrlExistingSecretKey: DATABASE_URL
   # -- Full redis:// URL override. Required when redis.enabled=false.
   redisUrlOverride: ""
+  # -- Secret-backed alternative to redisUrlOverride.
+  redisUrlExistingSecret: ""
+  redisUrlExistingSecretKey: REDIS_URL
 
   # -- compose `stop_grace_period: 2m`: on stop Silo fails readiness, keeps
   # serving for SILO_SHUTDOWN_DELAY (default 5s), then finishes in-flight
@@ -325,6 +368,7 @@ silo:
     startup:
       enabled: true
       periodSeconds: 2
+      timeoutSeconds: 3
       failureThreshold: 90
     readiness:
       enabled: true
@@ -345,6 +389,9 @@ silo:
 
   # -- Persistent data. Every entry becomes its own PVC (or uses
   # existingClaim); `storageClass: ""` falls back to the top-level one.
+  # Set `enabled: false` to omit a volume, or `type: emptyDir` (with optional
+  # `medium: Memory` and `sizeLimit`) for ephemeral scratch space such as
+  # `transcode`.
   persistence:
     # Host media, mounted read-only like compose `${MEDIA_ROOT}:...:ro`.
     media:
@@ -422,12 +469,15 @@ service:
     web:
       port: 8090
       targetPort: http
+      nodePort: null
     jellyfin:
       port: 8096
       targetPort: jellyfin
+      nodePort: null
     audiobookshelf:
       port: 13378
       targetPort: audiobookshelf
+      nodePort: null
 
 # ---------------------------------------------------------------------------
 # Gateway API (gateway.networking.k8s.io/v1) — the modern replacement for
@@ -436,6 +486,11 @@ service:
 # ---------------------------------------------------------------------------
 gateway:
   enabled: false
+  # -- Extra annotations applied to all rendered HTTPRoutes.
+  annotations: {}
+  # -- Optional Gateway API HTTPRouteRule timeouts (e.g.
+  # { request: "0s", backendRequest: "0s" } for long media streams).
+  timeouts: {}
   # -- Hostnames for the web UI HTTPRoute (required when enabled).
   hostnames: []
   # -- parentRefs to attach the HTTPRoutes to. Leave empty when
@@ -450,6 +505,8 @@ gateway:
   # GatewayClass already installed in the cluster.
   gateway:
     create: false
+    # -- Extra annotations for the Gateway (e.g. cert-manager.io/cluster-issuer).
+    annotations: {}
     gatewayClassName: ""
     # -- Raw listeners list for the created Gateway. Default: one plain
     # HTTP listener on port 80 allowing routes from the release namespace.

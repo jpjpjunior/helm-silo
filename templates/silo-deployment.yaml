@@ -20,9 +20,18 @@ spec:
         {{- with .Values.silo.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.silo.podAnnotations }}
+      {{- $hasSecretChecksum := or (and .Values.silo.secretKey (not .Values.silo.existingSecret)) (and .Values.postgres.enabled .Values.postgres.auth.password (not .Values.postgres.auth.existingSecret)) }}
+      {{- if or .Values.silo.podAnnotations $hasSecretChecksum }}
       annotations:
+        {{- if and .Values.silo.secretKey (not .Values.silo.existingSecret) }}
+        checksum/silo-secret: {{ .Values.silo.secretKey | sha256sum }}
+        {{- end }}
+        {{- if and .Values.postgres.enabled .Values.postgres.auth.password (not .Values.postgres.auth.existingSecret) }}
+        checksum/postgres-secret: {{ .Values.postgres.auth.password | sha256sum }}
+        {{- end }}
+        {{- with .Values.silo.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -38,6 +47,12 @@ spec:
       # fsGroup still makes PVC mounts group-accessible for PGID.
       securityContext:
         fsGroup: {{ .Values.silo.pgid }}
+        {{- with .Values.silo.supplementalGroups }}
+        supplementalGroups:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
         {{- if .Values.silo.nonRootMode }}
         runAsUser: {{ .Values.silo.puid }}
         runAsGroup: {{ .Values.silo.pgid }}
@@ -45,7 +60,7 @@ spec:
         {{- end }}
       # compose stop_grace_period: 2m
       terminationGracePeriodSeconds: {{ .Values.silo.terminationGracePeriodSeconds }}
-      {{- if .Values.silo.transcode.nvidia.enabled }}
+      {{- if and .Values.silo.transcode.nvidia.enabled .Values.silo.transcode.nvidia.runtimeClassName }}
       runtimeClassName: {{ .Values.silo.transcode.nvidia.runtimeClassName }}
       {{- end }}
       {{- with .Values.silo.nodeSelector }}
@@ -60,12 +75,20 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.silo.initContainers.enabled }}
+      {{- if and .Values.silo.initContainers.enabled (or .Values.postgres.enabled .Values.redis.enabled .Values.dragonfly.enabled) }}
       initContainers:
         # compose depends_on: condition: service_healthy
         - name: wait-for-datastores
           image: {{ .Values.silo.initContainers.image }}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            capabilities:
+              drop:
+                - ALL
           command: [sh, -c]
           args:
             - |
@@ -80,7 +103,7 @@ spec:
       {{- end }}
       containers:
         - name: silo
-          image: "{{ .Values.silo.image.repository }}:{{ .Values.silo.image.tag }}"
+          image: "{{ .Values.silo.image.repository }}:{{ .Values.silo.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.silo.image.pullPolicy }}
           {{- if .Values.silo.nonRootMode }}
           # Skip the image's s6 init (which needs root) and start the silo
@@ -88,26 +111,33 @@ spec:
           # Requires silo.databaseUrlOverride (external PostgreSQL).
           command: [silo]
           {{- end }}
-          {{- if or .Values.silo.dropAllCapabilities .Values.silo.capabilities }}
+          {{- if or .Values.silo.nonRootMode .Values.silo.dropAllCapabilities .Values.silo.capabilities }}
           # Drop the default capability set, then re-add only what the image
           # needs: the s6 root init chowns data dirs and drops to PUID:PGID
           # (baseline), plus compose cap_add: [NET_ADMIN] for BBR / TCP send
           # buffer. silo.dropAllCapabilities=false keeps the full default
           # set (compose parity); silo.capabilities=[] drops only the extras.
+          # In nonRootMode all capabilities are dropped and privilege
+          # escalation is disabled to satisfy the `restricted` PSS profile.
           securityContext:
+            {{- if .Values.silo.nonRootMode }}
+            allowPrivilegeEscalation: false
+            {{- end }}
             capabilities:
-              {{- if .Values.silo.dropAllCapabilities }}
+              {{- if or .Values.silo.nonRootMode .Values.silo.dropAllCapabilities }}
               drop:
                 - ALL
               {{- end }}
+              {{- if not .Values.silo.nonRootMode }}
               {{- $base := list "CHOWN" "FOWNER" "DAC_OVERRIDE" "SETGID" "SETUID" }}
               {{- $add := .Values.silo.capabilities }}
-              {{- if not .Values.silo.nonRootMode }}
+              {{- if .Values.silo.dropAllCapabilities }}
               {{- $add = concat $base $add }}
               {{- end }}
               {{- if $add }}
               add:
                 {{- toYaml $add | nindent 16 }}
+              {{- end }}
               {{- end }}
           {{- end }}
           ports:
@@ -140,7 +170,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.silo.existingSecret | default (printf "%s-silo-auth" (include "silo.fullname" .)) }}
                   key: {{ .Values.silo.existingSecretKey | default "SECRET_KEY" }}
-            {{- if .Values.silo.databaseUrlOverride }}
+            {{- if .Values.silo.databaseUrlExistingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.silo.databaseUrlExistingSecret }}
+                  key: {{ .Values.silo.databaseUrlExistingSecretKey | default "DATABASE_URL" }}
+            {{- else if .Values.silo.databaseUrlOverride }}
             - name: DATABASE_URL
               value: {{ .Values.silo.databaseUrlOverride | quote }}
             {{- else if and .Values.postgres.auth.existingSecret .Values.postgres.auth.existingSecretUrlKey }}
@@ -165,7 +201,13 @@ spec:
                   name: {{ printf "%s-postgres-auth" (include "silo.fullname" .) }}
                   key: DATABASE_URL
             {{- end }}
-            {{- if .Values.silo.redisUrlOverride }}
+            {{- if .Values.silo.redisUrlExistingSecret }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.silo.redisUrlExistingSecret }}
+                  key: {{ .Values.silo.redisUrlExistingSecretKey | default "REDIS_URL" }}
+            {{- else if .Values.silo.redisUrlOverride }}
             - name: REDIS_URL
               value: {{ .Values.silo.redisUrlOverride | quote }}
             {{- else }}
@@ -174,8 +216,10 @@ spec:
             {{- end }}
             - name: SILO_PLUGIN_CACHE_DIR
               value: /var/lib/silo/plugins
+            {{- if and .Values.postgres.enabled .Values.silo.postgresTune }}
             - name: POSTGRES_TUNE
               value: {{ .Values.silo.postgresTune | quote }}
+            {{- end }}
             {{- with .Values.silo.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -184,6 +228,9 @@ spec:
             tcpSocket:
               port: http
             periodSeconds: {{ .Values.silo.probes.startup.periodSeconds }}
+            {{- with .Values.silo.probes.startup.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
             failureThreshold: {{ .Values.silo.probes.startup.failureThreshold }}
           {{- end }}
           {{- if .Values.silo.probes.readiness.enabled }}
@@ -205,11 +252,17 @@ spec:
           volumeMounts:
             {{- range $name := keys $.Values.silo.persistence | sortAlpha }}
             {{- $vol := index $.Values.silo.persistence $name }}
+            {{- $enabled := true }}
+            {{- if hasKey $vol "enabled" }}
+            {{- $enabled = $vol.enabled }}
+            {{- end }}
+            {{- if $enabled }}
             - name: {{ $name }}
               mountPath: {{ $vol.mountPath }}
               {{- if $vol.readOnly }}
               readOnly: true
               {{- end }}
+            {{- end }}
             {{- end }}
             {{- if .Values.silo.hostProc.enabled }}
             # See values.yaml hostProc: only useful on LXC-backed nodes.
@@ -230,28 +283,50 @@ spec:
             {{- with .Values.silo.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- $resources := deepCopy (.Values.silo.resources | default dict) }}
           {{- if .Values.silo.transcode.nvidia.enabled }}
-          # With the NVIDIA claim set here, .Values.silo.resources is ignored
-          # (set your own resources map, including nvidia.com/gpu, to override).
-          resources:
-            {{- if .Values.silo.resources }}
-            {{- toYaml .Values.silo.resources | nindent 12 }}
-            {{- else }}
-            requests:
-              nvidia.com/gpu: {{ .Values.silo.transcode.nvidia.count }}
-            limits:
-              nvidia.com/gpu: {{ .Values.silo.transcode.nvidia.count }}
+            {{- $req := $resources.requests | default dict }}
+            {{- $lim := $resources.limits | default dict }}
+            {{- if not (hasKey $req "nvidia.com/gpu") }}
+              {{- $_ := set $req "nvidia.com/gpu" .Values.silo.transcode.nvidia.count }}
             {{- end }}
-          {{- else if .Values.silo.resources }}
+            {{- if not (hasKey $lim "nvidia.com/gpu") }}
+              {{- $_ := set $lim "nvidia.com/gpu" .Values.silo.transcode.nvidia.count }}
+            {{- end }}
+            {{- $_ := set $resources "requests" $req }}
+            {{- $_ := set $resources "limits" $lim }}
+          {{- end }}
+          {{- if $resources }}
           resources:
-            {{- toYaml .Values.silo.resources | nindent 12 }}
+            {{- toYaml $resources | nindent 12 }}
           {{- end }}
       volumes:
         {{- range $name := keys $.Values.silo.persistence | sortAlpha }}
         {{- $vol := index $.Values.silo.persistence $name }}
+        {{- $enabled := true }}
+        {{- if hasKey $vol "enabled" }}
+        {{- $enabled = $vol.enabled }}
+        {{- end }}
+        {{- if $enabled }}
+        {{- $volType := $vol.type | default "pvc" }}
         - name: {{ $name }}
+          {{- if eq $volType "emptyDir" }}
+          {{- if or $vol.medium $vol.sizeLimit }}
+          emptyDir:
+            {{- with $vol.medium }}
+            medium: {{ . | quote }}
+            {{- end }}
+            {{- with $vol.sizeLimit }}
+            sizeLimit: {{ . | quote }}
+            {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+          {{- else }}
           persistentVolumeClaim:
             claimName: {{ $vol.existingClaim | default (printf "%s-%s" (include "silo.fullname" $) $name) }}
+          {{- end }}
+        {{- end }}
         {{- end }}
         {{- if .Values.silo.hostProc.enabled }}
         - name: host-proc-meminfo

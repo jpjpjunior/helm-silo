@@ -55,6 +55,10 @@
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "shmSize": { "type": "string" },
         "args": { "type": "array", "items": { "type": "string" } },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "podSecurityContext": { "type": "object" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
         "resources": { "type": "object" },
@@ -71,6 +75,11 @@
         "image": { "$ref": "#/definitions/image" },
         "dropAllCapabilities": { "type": "boolean" },
         "capabilities": { "type": "array", "items": { "type": "string" } },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "podSecurityContext": { "type": "object" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
         "resources": { "type": "object" },
@@ -88,6 +97,10 @@
         "dropAllCapabilities": { "type": "boolean" },
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "args": { "type": "array", "items": { "type": "string" } },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "podSecurityContext": { "type": "object" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
         "resources": { "type": "object" },
@@ -108,6 +121,10 @@
         "existingSecret": { "type": "string" },
         "existingSecretKey": { "type": "string" },
         "upgradeDb": { "type": "boolean" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "podSecurityContext": { "type": "object" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
         "persistence": { "$ref": "#/definitions/persistence" },
         "extraEnv": { "type": "array", "items": { "type": "object" } },
         "resources": { "type": "object" },
@@ -120,17 +137,22 @@
     "silo": {
       "type": "object",
       "properties": {
-        "replicaCount": { "type": "integer", "minimum": 1 },
+        "replicaCount": { "type": "integer", "minimum": 0, "maximum": 1 },
         "image": { "$ref": "#/definitions/image" },
         "puid": { "type": "integer" },
         "pgid": { "type": "integer" },
+        "supplementalGroups": { "type": "array", "items": { "type": "integer" } },
         "nonRootMode": { "type": "boolean" },
         "existingSecret": { "type": "string" },
         "existingSecretKey": { "type": "string" },
         "secretKey": { "type": "string" },
         "postgresTune": { "type": "string" },
         "databaseUrlOverride": { "type": "string" },
+        "databaseUrlExistingSecret": { "type": "string" },
+        "databaseUrlExistingSecretKey": { "type": "string" },
         "redisUrlOverride": { "type": "string" },
+        "redisUrlExistingSecret": { "type": "string" },
+        "redisUrlExistingSecretKey": { "type": "string" },
         "terminationGracePeriodSeconds": { "type": "integer" },
         "updateStrategy": { "type": "string", "enum": ["Recreate", "RollingUpdate"] },
         "capabilities": { "type": "array", "items": { "type": "string" } },
@@ -186,12 +208,16 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
+              "enabled": { "type": "boolean" },
+              "type": { "type": "string", "enum": ["pvc", "emptyDir"] },
               "size": { "type": "string" },
               "storageClass": { "type": "string" },
               "existingClaim": { "type": "string" },
               "mountPath": { "type": "string" },
               "readOnly": { "type": "boolean" },
-              "accessModes": { "type": "array", "items": { "type": "string" } }
+              "accessModes": { "type": "array", "items": { "type": "string" } },
+              "medium": { "type": "string" },
+              "sizeLimit": { "type": "string" }
             },
             "additionalProperties": false
           }
@@ -211,7 +237,7 @@
     "service": {
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"] },
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
         "annotations": { "type": "object" },
         "externalTrafficPolicy": { "type": "string", "enum": ["", "Cluster", "Local"] },
         "ports": {
@@ -220,7 +246,8 @@
             "type": "object",
             "properties": {
               "port": { "type": "integer" },
-              "targetPort": { "type": ["string", "integer"] }
+              "targetPort": { "type": ["string", "integer"] },
+              "nodePort": { "type": ["integer", "null"], "minimum": 30000, "maximum": 32767 }
             },
             "required": ["port", "targetPort"],
             "additionalProperties": false
@@ -233,12 +260,15 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
+        "annotations": { "type": "object" },
+        "timeouts": { "type": "object" },
         "hostnames": { "type": "array", "items": { "type": "string" } },
         "parentRefs": { "type": "array", "items": { "type": "object" } },
         "gateway": {
           "type": "object",
           "properties": {
             "create": { "type": "boolean" },
+            "annotations": { "type": "object" },
             "gatewayClassName": { "type": "string" },
             "listeners": { "type": "array", "items": { "type": "object" } }
           },

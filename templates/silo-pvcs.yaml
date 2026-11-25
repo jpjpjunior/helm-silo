@@ -2,7 +2,12 @@
      existing claim. Key names become the claim suffix (e.g. <fullname>-media). */}}
 {{- range $name := keys .Values.silo.persistence | sortAlpha }}
 {{- $vol := index $.Values.silo.persistence $name }}
-{{- if not $vol.existingClaim }}
+{{- $enabled := true }}
+{{- if hasKey $vol "enabled" }}
+{{- $enabled = $vol.enabled }}
+{{- end }}
+{{- $volType := $vol.type | default "pvc" }}
+{{- if and $enabled (eq $volType "pvc") (not $vol.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

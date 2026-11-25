@@ -4,16 +4,18 @@
 {{- end -}}
 
 {{/* Release-scoped full name. Avoids doubling when the release name
-     already contains the chart name (installing as "silo" gives "silo"). */}}
+     already contains the chart name (installing as "silo" gives "silo").
+     Truncated to 44 chars so suffixed resource names (e.g. -download-artifacts)
+     never exceed Kubernetes' 63-char DNS label limit. */}}
 {{- define "silo.fullname" -}}
 {{- if .Values.fullnameOverride -}}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- .Values.fullnameOverride | trunc 44 | trimSuffix "-" -}}
 {{- else -}}
 {{- $name := include "silo.name" . -}}
 {{- if contains $name .Release.Name -}}
-{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- .Release.Name | trunc 44 | trimSuffix "-" -}}
 {{- else -}}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 44 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -73,7 +75,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- if $auth.existingSecret -}}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace $auth.existingSecret -}}
 {{- if $secret -}}
+{{- if hasKey $secret.data $auth.existingSecretPasswordKey -}}
 {{- index $secret.data $auth.existingSecretPasswordKey | b64dec -}}
+{{- else -}}
+{{- fail (printf "key %q not found in postgres.auth.existingSecret %q in namespace %q" $auth.existingSecretPasswordKey $auth.existingSecret .Release.Namespace) -}}
+{{- end -}}
 {{- else -}}
 {{- fail (printf "postgres.auth.existingSecret %q not found in namespace %q (helm template/--dry-run cannot read cluster secrets: install against the cluster, or set postgres.auth.password for offline rendering)" $auth.existingSecret .Release.Namespace) -}}
 {{- end -}}
@@ -81,7 +87,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- $auth.password -}}
 {{- else -}}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace (printf "%s-postgres-auth" (include "silo.fullname" .)) -}}
-{{- if $secret -}}
+{{- if and $secret (hasKey $secret.data "postgres-password") -}}
 {{- index $secret.data "postgres-password" | b64dec -}}
 {{- else -}}
 {{- randAlphaNum 24 -}}
@@ -92,7 +98,7 @@ app.kubernetes.io/component: {{ .component }}
 {{/* In-cluster DATABASE_URL (password is URL-escaped). */}}
 {{- define "silo.databaseUrl" -}}
 {{- $auth := .Values.postgres.auth -}}
-{{- printf "postgres://%s:%s@%s-postgres:5432/%s?sslmode=disable" $auth.username (include "silo.postgresPassword" . | urlquery) (include "silo.fullname" .) $auth.database -}}
+{{- printf "postgres://%s:%s@%s-postgres:5432/%s?sslmode=disable" ($auth.username | urlquery) (include "silo.postgresPassword" . | urlquery) (include "silo.fullname" .) ($auth.database | urlquery) -}}
 {{- end -}}
 
 {{/* In-cluster REDIS_URL: DragonflyDB when enabled, otherwise the Redis
@@ -109,23 +115,26 @@ app.kubernetes.io/component: {{ .component }}
      broken or non-starting release. Mirrors the compose file's own
      fail-fast checks (SECRET_KEY, MEILI_MASTER_KEY). */}}
 {{- define "silo.validateValues" -}}
-{{- if ne (int .Values.silo.replicaCount) 1 -}}
-{{- fail "silo.replicaCount must be 1: Silo is a single-instance server backed by ReadWriteOnce volumes" -}}
+{{- $replicas := int .Values.silo.replicaCount -}}
+{{- if or (lt $replicas 0) (gt $replicas 1) -}}
+{{- fail "silo.replicaCount must be 0 or 1: Silo is a single-instance server backed by ReadWriteOnce volumes" -}}
 {{- end -}}
 {{- if and (not .Values.silo.existingSecret) (not .Values.silo.secretKey) -}}
 {{- fail "Silo refuses to start without SECRET_KEY. Generate one with: openssl rand -base64 48 ; store it in a Secret (kubectl create secret generic silo-secrets --from-literal=SECRET_KEY='<generated key>') and set silo.existingSecret, or set silo.secretKey directly (convenient for trials; stored in the release)" -}}
 {{- end -}}
-{{- if and (not .Values.postgres.enabled) (not .Values.silo.databaseUrlOverride) -}}
-{{- fail "silo.databaseUrlOverride is required when postgres.enabled=false (e.g. point it at a CloudNativePG cluster)" -}}
+{{- $hasExternalDb := or .Values.silo.databaseUrlOverride .Values.silo.databaseUrlExistingSecret -}}
+{{- if and (not .Values.postgres.enabled) (not $hasExternalDb) -}}
+{{- fail "silo.databaseUrlOverride or silo.databaseUrlExistingSecret is required when postgres.enabled=false (e.g. point it at a CloudNativePG cluster)" -}}
 {{- end -}}
 {{- if and .Values.redis.enabled .Values.dragonfly.enabled -}}
 {{- fail "redis.enabled and dragonfly.enabled are mutually exclusive: pick one cache backend (or disable both and point silo.redisUrlOverride at an external one)" -}}
 {{- end -}}
-{{- if and (not .Values.redis.enabled) (not .Values.dragonfly.enabled) (not .Values.silo.redisUrlOverride) -}}
-{{- fail "silo.redisUrlOverride is required when redis.enabled=false and dragonfly.enabled=false (e.g. point it at an external Redis or DragonflyDB)" -}}
+{{- $hasExternalCache := or .Values.silo.redisUrlOverride .Values.silo.redisUrlExistingSecret -}}
+{{- if and (not .Values.redis.enabled) (not .Values.dragonfly.enabled) (not $hasExternalCache) -}}
+{{- fail "silo.redisUrlOverride or silo.redisUrlExistingSecret is required when redis.enabled=false and dragonfly.enabled=false (e.g. point it at an external Redis or DragonflyDB)" -}}
 {{- end -}}
-{{- if and .Values.silo.nonRootMode (not .Values.silo.databaseUrlOverride) -}}
-{{- fail "silo.nonRootMode=true runs the silo binary without the image's init, which per the image's docs requires an external PostgreSQL: set silo.databaseUrlOverride (and disable postgres)" -}}
+{{- if and .Values.silo.nonRootMode (not $hasExternalDb) -}}
+{{- fail "silo.nonRootMode=true runs the silo binary without the image's init, which per the image's docs requires an external PostgreSQL: set silo.databaseUrlOverride or silo.databaseUrlExistingSecret (and disable postgres)" -}}
 {{- end -}}
 {{- if and .Values.meilisearch.enabled (not .Values.meilisearch.masterKey) (not .Values.meilisearch.existingSecret) -}}
 {{- fail "meilisearch.enabled=true requires meilisearch.masterKey or meilisearch.existingSecret (mirrors the compose entrypoint check)" -}}
@@ -136,6 +145,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- if and (not .Values.gateway.parentRefs) (not .Values.gateway.gateway.create) -}}
 {{- fail "gateway.enabled=true needs somewhere to attach: set gateway.gateway.create=true to create a chart-managed Gateway, or provide gateway.parentRefs pointing at an existing one" -}}
+{{- end -}}
+{{- if and .Values.gateway.parentRefs .Values.gateway.gateway.create -}}
+{{- fail "gateway.gateway.create=true and gateway.parentRefs are mutually exclusive: either attach to an existing Gateway or let the chart create one" -}}
 {{- end -}}
 {{- if and .Values.gateway.gateway.create (not .Values.gateway.gateway.gatewayClassName) -}}
 {{- fail "gateway.gateway.create=true requires gateway.gateway.gatewayClassName (must reference an installed GatewayClass, e.g. envoy, cilium, nginx)" -}}
