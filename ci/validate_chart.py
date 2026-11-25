@@ -93,6 +93,16 @@ def a_default(ds):
         cc = x.get("securityContext", {}).get("capabilities", {})
         check(cc.get("drop") == ["ALL"], f"A: {x['name']} drops ALL caps")
         check(cc.get("add") == ["CHOWN", "FOWNER", "SETGID", "SETUID"], f"A: {x['name']} minimal caps ({cc.get('add')})")
+    # wait-for-datastores init container: rendered only when an in-cluster
+    # datastore is enabled, and hardened (restricted-PSS shape)
+    ics = dep["spec"]["template"]["spec"].get("initContainers", [])
+    ic0 = ics[0] if ics else {}
+    icsec = ic0.get("securityContext", {})
+    check(ics and icsec.get("runAsNonRoot") is True and icsec.get("runAsUser") == 65534,
+          f"A: wait-for-datastores hardened (runAsNonRoot, uid 65534) ({icsec})")
+    check(ics and icsec.get("capabilities", {}).get("drop") == ["ALL"], "A: initContainer drops ALL caps")
+    icscript = (ic0.get("args") or [""])[0]
+    check("postgres" in icscript and "redis" in icscript, "A: initContainer waits on postgres+redis")
     # securityContext / strategy / grace
     ps = dep["spec"]["template"]["spec"]["securityContext"]
     check(ps.get("fsGroup") == 1000 and "runAsUser" not in ps and not ps.get("runAsNonRoot"), "A: pod starts as root for s6 init (fsGroup=pgid, no runAsUser)")
@@ -184,7 +194,7 @@ def c_external(ds):
     vs = {v["name"]: v["persistentVolumeClaim"]["claimName"] for v in volumes(dep) if "persistentVolumeClaim" in v}
     check(vs.get("media") == "media-nfs", "C: media existingClaim")
     ic = dep["spec"]["template"]["spec"].get("initContainers", [])
-    check(ic and "postgres" not in ic[0]["args"][0] and "redis" not in ic[0]["args"][0], "C: initContainer empty (no in-cluster stores)")
+    check(not ic, "C: no wait-for-datastores initContainer (no in-cluster stores)")
     check(len(by_kind(ds, "Service")) == 1, "C: only main Service")
     ps = dep["spec"]["template"]["spec"]["securityContext"]
     check(ps.get("runAsUser") == 1000 and ps.get("runAsGroup") == 1000 and ps.get("runAsNonRoot") is True, "C: nonRootMode runAsUser/Group 1000, runAsNonRoot")

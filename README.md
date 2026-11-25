@@ -411,6 +411,26 @@ If an image update ever needs a capability, add it to that component's
 `capabilities` list; set `dropAllCapabilities: false` on any component to
 restore the full default set (compose parity).
 
+### Upgrade notes (0.5.0)
+
+- **Resource-name length guard:** `fullname` is truncated to 44 characters so
+  suffixed names (`-download-artifacts`, ...) stay inside Kubernetes' 63-char
+  DNS label limit. Only matters if your release name is long: if truncation
+  changes your resource names, PVCs would be recreated (data loss) — set
+  `fullnameOverride` to your existing names (or stay on 0.4.x) before upgrading.
+- `silo.replicaCount` may now be `0` (maintenance/migration) or `1`.
+- `gateway.gateway.create=true` and `gateway.parentRefs` are mutually
+  exclusive; rendering fails if both are set (previously `parentRefs`
+  silently won).
+- The `wait-for-datastores` init container only renders when an in-cluster
+  datastore (postgres/redis/dragonfly) is enabled — external-only installs
+  no longer start a sidecar that waits on services that don't exist.
+- New: secret-backed `silo.databaseUrlExistingSecret` /
+  `silo.redisUrlExistingSecret` (credentials leave the pod spec), per-volume
+  `enabled: false` and `type: emptyDir`, checksum annotations that roll pods
+  when explicit secrets change, and hardened init/test pods (non-root, drop
+  ALL capabilities).
+
 ## Migrating from docker compose
 
 There is no in-place upgrade: Kubernetes reads different volumes. A manual
