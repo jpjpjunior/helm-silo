@@ -57,7 +57,7 @@ jobs:
           git config user.name "chart-bot"
           git config user.email "chart-bot@users.noreply.github.com"
           git fetch origin gh-pages
-          git worktree add gh-pages origin/gh-pages
+          git worktree add -B gh-pages gh-pages origin/gh-pages
           cp /tmp/pkg/silo-*.tgz gh-pages/
           ( cd gh-pages && helm repo index . --merge index.yaml --url https://jpjpjunior.github.io/helm-silo \
             && git add -A && git commit -m "gh-pages: add ${GITHUB_REF_NAME}" \
