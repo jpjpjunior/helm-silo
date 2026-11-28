@@ -47,6 +47,7 @@ spec:
       # fsGroup still makes PVC mounts group-accessible for PGID.
       securityContext:
         fsGroup: {{ .Values.silo.pgid }}
+        fsGroupChangePolicy: {{ .Values.silo.fsGroupChangePolicy }}
         {{- with .Values.silo.supplementalGroups }}
         supplementalGroups:
           {{- toYaml . | nindent 10 }}
