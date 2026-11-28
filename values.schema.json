@@ -141,6 +141,7 @@
         "image": { "$ref": "#/definitions/image" },
         "puid": { "type": "integer" },
         "pgid": { "type": "integer" },
+        "fsGroupChangePolicy": { "type": "string", "enum": ["OnRootMismatch", "Always"] },
         "supplementalGroups": { "type": "array", "items": { "type": "integer" } },
         "nonRootMode": { "type": "boolean" },
         "existingSecret": { "type": "string" },
