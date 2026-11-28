@@ -456,6 +456,25 @@ and when:
 Everything except the read-only media re-chowns automatically after a
 `PUID`/`PGID` change, because every mechanism above runs on every start.
 
+### Upgrade notes (0.5.2)
+
+- **New `take-ownership` init container (rendered by default):** a plugin
+  cache whose `@sigstore-tuf` directory was created by root (for example
+  after one run of the image with the wrong uid) cannot be repaired with
+  `chmod` — Silo refuses caches owned by another uid, and mode bits never
+  change the owner. The init mirrors the image's `own_tree`: in the
+  app-owned mounts (`plugins`, `artwork`, `compat`, `backups`) every entry
+  not already `PUID:PGID` is chowned, and the plugin cache root is kept
+  private `0700`. It runs as root with only `CHOWN` and `DAC_OVERRIDE`
+  granted, after kubelet's fsGroup walk, on every start. Skipped entirely
+  in `nonRootMode` (root is forbidden there) — pre-own the volumes
+  yourself, now including `/tmp/silo-transcode` and
+  `/tmp/silo-download-artifacts` (see "Data ownership" above).
+- **Documentation corrections:** the meilisearch image (v1.54.0) runs as
+  root — no `USER` directive — not as its own non-root user; the pod
+  `fsGroup: 1000` stays as insurance and is now asserted by the B test
+  scenario. The README gained the full volume-ownership matrix.
+
 ### Upgrade notes (0.5.0)
 
 - **Defaults restore the full default capability set (compose parity):**
