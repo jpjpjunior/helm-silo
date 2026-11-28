@@ -187,6 +187,9 @@ def b_meili(ds):
     check(len(by_kind(ds, "Secret")) == 2, "B: postgres-auth + meili-auth secrets")
     msts = [s for s in by_kind(ds, "StatefulSet") if s["metadata"]["name"] == "silo-meilisearch"][0]
     mc = msts["spec"]["template"]["spec"]["containers"][0]
+    mpod = msts["spec"]["template"]["spec"].get("securityContext", {})
+    check(mpod.get("fsGroup") == 1000 and mpod.get("seccompProfile", {}).get("type") == "RuntimeDefault",
+          f"B: meili pod fsGroup 1000 + RuntimeDefault seccomp ({mpod})")
     check(mc["image"] == "getmeili/meilisearch:v1.54.0", "B: meili pinned image")
     msec = mc.get("securityContext", {})
     check(msec.get("allowPrivilegeEscalation") is False and "capabilities" not in msec,

@@ -214,9 +214,11 @@ meilisearch:
     # Bump deliberately, together with upgradeDb.
     tag: v1.54.0
     pullPolicy: IfNotPresent
-  # -- Opt-in hardening: drop ALL default Linux capabilities; the image runs
-  # as its own non-root user, so nothing needs re-adding. Default false =
-  # full default capability set (compose parity).
+  # -- Opt-in hardening: drop ALL default Linux capabilities; the image
+  # runs as root (v1.54.0 has no USER directive), so nothing needs
+  # re-adding. Default false = full default capability set (compose
+  # parity). The pod fsGroup below keeps the data PVC writable if a later
+  # image switches to a non-root user.
   dropAllCapabilities: false
   capabilities: []
   # -- Master key; required when enabled (fail-fast, like the compose

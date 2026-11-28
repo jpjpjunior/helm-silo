@@ -407,7 +407,7 @@ re-add only a minimal list:
 | silo | `CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID` + your `silo.capabilities` (`NET_ADMIN`) | root s6 init chowns data dirs and drops to `PUID:PGID`; BBR / send-buffer helper |
 | postgres, redis | `CHOWN, FOWNER, DAC_OVERRIDE, SETGID, SETUID` | entrypoint chowns the data dir, gosu privilege drop; `DAC_OVERRIDE` is needed on data volumes created by older releases (0700 dirs owned by the server uid) |
 | dragonfly | `CHOWN, FOWNER, DAC_OVERRIDE` | the entrypoint chowns the data dir to dfly before exec |
-| meilisearch | — | non-root image, nothing needed |
+| meilisearch | — | image runs as root (no USER directive), so the fresh data PVC is writable as-is; pod `fsGroup: 1000` keeps it working if a later image switches to a non-root user |
 
 If an image update ever needs a capability, add it to that component's
 `capabilities` list; set `dropAllCapabilities: false` on any component to
@@ -435,7 +435,26 @@ kubelet's fsGroup walk, so it re-secures the cache on every start whatever
 `fsGroupChangePolicy` says. The init is skipped in `nonRootMode` (it must run
 as root, which the `restricted` pod-security profile forbids): there you own
 the volumes yourself — e.g. a one-off privileged helper pod that mounts the
-claims and runs `chown -R 1000:1000 /var/lib/silo` once after install.
+claims and runs `chown -R 1000:1000 /var/lib/silo /tmp/silo-transcode
+/tmp/silo-download-artifacts` once after install — all the app-owned mounts,
+including the two /tmp-backed ones the image's own init normally handles.
+
+For the record, the full ownership picture — who takes ownership of what,
+and when:
+
+| Volume | Backing | Ownership taken by |
+| --- | --- | --- |
+| `/var/lib/silo/plugins` (incl. `@sigstore-tuf`) | PVC | `take-ownership` init — chown `PUID:PGID`, cache root private `0700` |
+| `/var/lib/silo/artwork`, `compat`, `backups` | PVC | `take-ownership` init — chown `PUID:PGID` |
+| `/tmp/silo-transcode`, `/tmp/silo-download-artifacts` | PVC | the image's own init (`own_tree silo`) |
+| `/mnt/media`, `/catalog-seeds` | read-only mounts | nobody — Silo only reads |
+| postgres data | VCT | image entrypoint (root chown) + pod `fsGroup: 999` |
+| redis / dragonfly data | VCT | image entrypoint (root chown) |
+| meilisearch data | VCT | image runs as root; pod `fsGroup: 1000` as non-root insurance |
+| app caches under `/tmp` (`silo-uploads`, `silo-diagnostics-uploads`, `silo-ebook-epub`) | container fs | Silo creates them `0700` itself; the image init wipes any it does not fully own |
+
+Everything except the read-only media re-chowns automatically after a
+`PUID`/`PGID` change, because every mechanism above runs on every start.
 
 ### Upgrade notes (0.5.0)
 
