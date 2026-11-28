@@ -76,8 +76,68 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if and .Values.silo.initContainers.enabled (or .Values.postgres.enabled .Values.redis.enabled .Values.dragonfly.enabled) }}
+      {{- $ownedMounts := list }}
+      {{- $pluginsMount := "" }}
+      {{- range $name := list "backups" "compat" "plugins" "artwork" }}
+      {{-   $vol := index $.Values.silo.persistence $name }}
+      {{-   $enabled := true }}
+      {{-   if hasKey $vol "enabled" }}
+      {{-     $enabled = $vol.enabled }}
+      {{-   end }}
+      {{-   if $enabled }}
+      {{-     $ownedMounts = append $ownedMounts $vol.mountPath }}
+      {{-     if eq $name "plugins" }}
+      {{-       $pluginsMount = $vol.mountPath }}
+      {{-     end }}
+      {{-   end }}
+      {{- end }}
+      {{- if .Values.silo.initContainers.enabled }}
+      {{-   $wantOwnership := and (not .Values.silo.nonRootMode) $ownedMounts }}
+      {{-   $wantWait := or .Values.postgres.enabled .Values.redis.enabled .Values.dragonfly.enabled }}
+      {{-   if or $wantOwnership $wantWait }}
       initContainers:
+        {{- if $wantOwnership }}
+        # The image's s6 init hands /config/silo and /tmp/silo-* to the silo
+        # account, but never /var/lib/silo/*: these chart-owned mounts arrive
+        # root-owned on a fresh PVC, and fsGroup fixes only the GROUP, never
+        # the uid. Silo's plugin trust model refuses a plugin/TUF cache owned
+        # by another uid or writable by group/other users (see the image's
+        # docs/architecture/plugin-trust.md) — the '@sigstore-tuf' startup
+        # failure; a manual chmod cannot fix it, only chown can. Mirror the
+        # image's own_tree: hand every app-owned tree to PUID:PGID, then keep
+        # the plugin cache root private 0700. The init runs after kubelet's
+        # fsGroup walk, so it re-secures the cache on every start, whatever
+        # fsGroupChangePolicy says.
+        - name: take-ownership
+          image: {{ .Values.silo.initContainers.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+          env:
+            - name: PUID
+              value: {{ .Values.silo.puid | quote }}
+            - name: PGID
+              value: {{ .Values.silo.pgid | quote }}
+          command: [sh, -c]
+          args:
+            - |
+              for d in {{ join " " $ownedMounts }}; do
+                find "$d" \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown -h "$PUID:$PGID" {} + 2>/dev/null || true
+              done
+              {{- if $pluginsMount }}
+              chmod 700 {{ $pluginsMount }}
+              [ -d {{ $pluginsMount }}/@sigstore-tuf ] && chmod 700 {{ $pluginsMount }}/@sigstore-tuf
+              {{- end }}
+              echo "data dirs owned by $PUID:$PGID, plugin cache private"
+        {{- end }}
+        {{- if $wantWait }}
         # compose depends_on: condition: service_healthy
         - name: wait-for-datastores
           image: {{ .Values.silo.initContainers.image }}
@@ -101,6 +161,8 @@ spec:
               until nc -z -w2 {{ $cacheHost }} 6379; do echo "waiting for cache backend..."; sleep 2; done
               {{- end }}
               echo "datastores are accepting connections"
+        {{- end }}
+      {{-   end }}
       {{- end }}
       containers:
         - name: silo

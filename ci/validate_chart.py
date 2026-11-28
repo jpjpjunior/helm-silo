@@ -99,11 +99,26 @@ def a_default(ds):
     # wait-for-datastores init container: rendered only when an in-cluster
     # datastore is enabled, and hardened (restricted-PSS shape)
     ics = dep["spec"]["template"]["spec"].get("initContainers", [])
-    ic0 = ics[0] if ics else {}
+    ic0 = next((x for x in ics if x["name"] == "wait-for-datastores"), {})
     icsec = ic0.get("securityContext", {})
     check(ics and icsec.get("runAsNonRoot") is True and icsec.get("runAsUser") == 65534,
           f"A: wait-for-datastores hardened (runAsNonRoot, uid 65534) ({icsec})")
     check(ics and icsec.get("capabilities", {}).get("drop") == ["ALL"], "A: initContainer drops ALL caps")
+    # take-ownership init: the image never chowns the /var/lib/silo/* mounts,
+    # and Silo refuses a plugin/TUF cache owned by another uid or group/other-
+    # writable — the '@sigstore-tuf' startup failure a plain chmod cannot fix
+    own = next((x for x in ics if x["name"] == "take-ownership"), {})
+    osec = own.get("securityContext", {})
+    ocap = osec.get("capabilities", {})
+    check(own and osec.get("runAsUser") == 0 and not osec.get("runAsNonRoot"),
+          f"A: take-ownership runs as root ({osec})")
+    check(ocap.get("drop") == ["ALL"] and ocap.get("add") == ["CHOWN", "DAC_OVERRIDE"],
+          f"A: take-ownership minimal caps ({ocap})")
+    oscript = (own.get("args") or [""])[0]
+    check("chmod 700 /var/lib/silo/plugins" in oscript and "@sigstore-tuf" in oscript
+          and "/var/lib/silo/artwork" in oscript and "/var/lib/silo/compat" in oscript
+          and "/var/lib/silo/backups" in oscript,
+          "A: take-ownership covers app-owned mounts + private plugin cache")
     icscript = (ic0.get("args") or [""])[0]
     check("postgres" in icscript and "redis" in icscript, "A: initContainer waits on postgres+redis")
     # securityContext / strategy / grace
@@ -131,7 +146,8 @@ def a_default(ds):
     shm = [v for v in pgsts["spec"]["template"]["spec"]["volumes"] if v["name"] == "shm"][0]["emptyDir"]
     check(shm.get("medium") == "Memory" and shm.get("sizeLimit") == "8Gi", f"A: shm tmpfs 8Gi ({shm})")
     # initContainer waits for both
-    ic = dep["spec"]["template"]["spec"]["initContainers"][0]["args"][0]
+    ic = next(x for x in dep["spec"]["template"]["spec"]["initContainers"]
+              if x["name"] == "wait-for-datastores")["args"][0]
     check("silo-postgres 5432" in ic and "silo-redis 6379" in ic, "A: initContainer waits for postgres+redis")
     # probes tcp
     check(c["startupProbe"]["tcpSocket"]["port"] == "http", "A: tcpSocket startup probe")
@@ -197,7 +213,7 @@ def c_external(ds):
     vs = {v["name"]: v["persistentVolumeClaim"]["claimName"] for v in volumes(dep) if "persistentVolumeClaim" in v}
     check(vs.get("media") == "media-nfs", "C: media existingClaim")
     ic = dep["spec"]["template"]["spec"].get("initContainers", [])
-    check(not ic, "C: no wait-for-datastores initContainer (no in-cluster stores)")
+    check(not ic, "C: no init containers (external stores + restricted PSS)")
     check(len(by_kind(ds, "Service")) == 1, "C: only main Service")
     ps = dep["spec"]["template"]["spec"]["securityContext"]
     check(ps.get("runAsUser") == 1000 and ps.get("runAsGroup") == 1000 and ps.get("runAsNonRoot") is True, "C: nonRootMode runAsUser/Group 1000, runAsNonRoot")
@@ -276,7 +292,8 @@ def j_dragonfly(ds):
     dep = by_kind(ds, "Deployment")[0]
     e = get_env(dep, "REDIS_URL")
     check(e and e.get("value") == "redis://silo-dragonfly:6379", f"J: REDIS_URL -> dragonfly ({e and e.get('value')})")
-    ic = dep["spec"]["template"]["spec"]["initContainers"][0]["args"][0]
+    ic = next(x for x in dep["spec"]["template"]["spec"]["initContainers"]
+              if x["name"] == "wait-for-datastores")["args"][0]
     check("silo-dragonfly 6379" in ic and "silo-redis" not in ic, "J: initContainer waits for dragonfly")
     vct = df["spec"]["volumeClaimTemplates"]
     check(vct and vct[0]["spec"]["resources"]["requests"]["storage"] == "8Gi", "J: dragonfly data PVC 8Gi")

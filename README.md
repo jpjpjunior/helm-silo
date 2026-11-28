@@ -413,6 +413,30 @@ If an image update ever needs a capability, add it to that component's
 `capabilities` list; set `dropAllCapabilities: false` on any component to
 restore the full default set (compose parity).
 
+### Data ownership (take-ownership init)
+
+A fresh PVC arrives **root-owned**, and kubelet's `fsGroup` fixes only the
+group — never the owning uid. The Silo image's own init hands `/config/silo`
+and `/tmp/silo-*` to the `silo` account, but this chart mounts the app-owned
+data outside those paths (`/var/lib/silo/plugins`, `artwork`, `compat`,
+`backups`), so nothing ever chowns them. That bites hardest on the plugin
+cache: Silo's plugin trust model refuses a plugin/TUF cache owned by another
+uid or writable by group/other users, so the server fails on
+`<plugin cache>/@sigstore-tuf` with a refusal like *"owned by uid 0, not this
+process's uid 1000"*. A manual `kubectl exec ... chmod` cannot fix that — the
+mode bits change, the owner stays root.
+
+The chart therefore renders a `take-ownership` init container (busybox, runs
+as root with only `CHOWN` and `DAC_OVERRIDE` granted, everything else
+dropped) that mirrors the image's `own_tree`: every entry not already
+`PUID:PGID` is chowned in the app-owned mounts, and the plugin cache root —
+plus `@sigstore-tuf` when present — is kept private `0700`. It runs after
+kubelet's fsGroup walk, so it re-secures the cache on every start whatever
+`fsGroupChangePolicy` says. The init is skipped in `nonRootMode` (it must run
+as root, which the `restricted` pod-security profile forbids): there you own
+the volumes yourself — e.g. a one-off privileged helper pod that mounts the
+claims and runs `chown -R 1000:1000 /var/lib/silo` once after install.
+
 ### Upgrade notes (0.5.0)
 
 - **Defaults restore the full default capability set (compose parity):**

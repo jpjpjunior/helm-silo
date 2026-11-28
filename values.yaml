@@ -270,7 +270,8 @@ silo:
   # run modes). OnRootMismatch: kubelet chowns a volume only when its root
   # dir's owner/group mismatches fsGroup — fast restarts on large media
   # volumes. Always: full recursive chown on every pod start (the behavior
-  # before 0.5.1).
+  # before 0.5.1). The take-ownership init runs after kubelet's walk and
+  # re-secures the plugin cache to 0700 either way.
   fsGroupChangePolicy: OnRootMismatch
   # -- Extra GIDs added to the Silo pod (useful for VA-API `/dev/dri` devices
   # owned by the host `render` or `video` group, e.g. [44, 109]).
@@ -387,8 +388,15 @@ silo:
       timeoutSeconds: 5
       failureThreshold: 3
 
-  # -- initContainer that waits for the in-cluster postgres/redis to accept
+  # -- Init helpers (busybox). `take-ownership` hands the app-owned data
+  # mounts (/var/lib/silo/plugins, artwork, compat, backups) to PUID:PGID and
+  # keeps the plugin cache root private 0700: a fresh PVC arrives root-owned
+  # (fsGroup fixes groups, never uids), and Silo refuses a plugin/TUF cache
+  # another account could control — the '@sigstore-tuf' startup failure.
+  # `wait-for-datastores` waits for the in-cluster postgres/redis to accept
   # TCP connections (compose `depends_on: condition: service_healthy`).
+  # disabled = no init containers at all (take-ownership off means you own
+  # the data dirs yourself).
   initContainers:
     enabled: true
     image: busybox:1.36
@@ -406,7 +414,8 @@ silo:
       existingClaim: ""
       mountPath: /mnt/media
       readOnly: true
-    # Ownership taken by Silo on start; survives image updates.
+    # Ownership handed to PUID:PGID by the take-ownership init on every
+    # start; the cache root is kept private 0700. Survives image updates.
     plugins:
       size: 1Gi
       mountPath: /var/lib/silo/plugins
