@@ -266,6 +266,12 @@ silo:
   # media. With silo.nonRootMode=true the values become runAsUser/runAsGroup.
   puid: 1000
   pgid: 1000
+  # -- fsGroupChangePolicy for the pod securityContext (rendered in both
+  # run modes). OnRootMismatch: kubelet chowns a volume only when its root
+  # dir's owner/group mismatches fsGroup — fast restarts on large media
+  # volumes. Always: full recursive chown on every pod start (the behavior
+  # before 0.5.1).
+  fsGroupChangePolicy: OnRootMismatch
   # -- Extra GIDs added to the Silo pod (useful for VA-API `/dev/dri` devices
   # owned by the host `render` or `video` group, e.g. [44, 109]).
   supplementalGroups: []

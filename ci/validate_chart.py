@@ -93,6 +93,9 @@ def a_default(ds):
         sec = x.get("securityContext", {})
         check(sec.get("allowPrivilegeEscalation") is False, f"A: {x['name']} allowPrivilegeEscalation false")
         check("capabilities" not in sec, f"A: {x['name']} default cap set (no capDrop, no capAdd)")
+    podsec = dep["spec"]["template"]["spec"].get("securityContext", {})
+    check(podsec.get("fsGroupChangePolicy") == "OnRootMismatch",
+          f"A: fsGroupChangePolicy OnRootMismatch ({podsec.get('fsGroupChangePolicy')})")
     # wait-for-datastores init container: rendered only when an in-cluster
     # datastore is enabled, and hardened (restricted-PSS shape)
     ics = dep["spec"]["template"]["spec"].get("initContainers", [])
